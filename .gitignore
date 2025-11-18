@@ -93,3 +93,4 @@ celerybeat-schedule
 dmypy.json
 
 DATA/
+.results/
