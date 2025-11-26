@@ -126,6 +126,7 @@ class CNN2D_Baseline(nn.Module):
         plt.plot(epochs, validation_loss, label='Validation Loss')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
+        plt.ylim(0, 30000)
         plt.title('Training and Validation Loss Over Epochs')
         plt.legend()
         plt.grid(True)
@@ -158,8 +159,8 @@ class CNN2D_Baseline(nn.Module):
         rmse_model = np.sqrt(np.mean((y_pred - y_test)**2, axis=0)).squeeze()
         rmse_persistence = np.sqrt(np.mean((persistence_pred - y_test)**2, axis=0)).squeeze()
 
-        vmin = min(rmse_model.min(), rmse_persistence.min())
-        vmax = max(rmse_model.max(), rmse_persistence.max())
+        vmin = rmse_persistence.min()
+        vmax = rmse_persistence.max()
 
         fig, axs = plt.subplots(1, 2, figsize=(14,5), constrained_layout=True)
 
