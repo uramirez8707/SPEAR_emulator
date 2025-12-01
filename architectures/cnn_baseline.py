@@ -4,9 +4,21 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 from pathlib import Path
+from architectures.Models import get_model_archirecture
+
 import random
 import numpy as np
-from architectures.Models import get_model_archirecture
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if using multi-GPU
+    torch.backends.cudnn.deterministic = True  # force deterministic algorithms
+    torch.backends.cudnn.benchmark = False     # disable auto-tuner for convolution
+
+
 
 class CNN2D_Baseline(nn.Module):
     def __init__(self, in_channels, case=0, label="baseline"):
@@ -29,6 +41,16 @@ class CNN2D_Baseline(nn.Module):
 
     def create_data_loaders(self, X_train, y_train, X_test, y_test, batch_size=32):
 
+        g = torch.Generator()
+        g.manual_seed(42)
+
+        g2 = torch.Generator()
+        g2.manual_seed(42)
+
+        def worker_init_fn(worker_id):
+            np.random.seed(42 + worker_id)
+            random.seed(42 + worker_id)
+
         # Save the data to use it later:
         self.X_train = X_train
         self.y_train = y_train
@@ -43,8 +65,14 @@ class CNN2D_Baseline(nn.Module):
         train_ds = TensorDataset(X_train_t, y_train_t)
         test_ds = TensorDataset(X_test_t, y_test_t)
 
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                                  generator=g,
+                                  worker_init_fn=worker_init_fn,
+                                  num_workers=0)
+        test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False,
+                                 generator=g2,
+                                 worker_init_fn=worker_init_fn,
+                                 num_workers=0)
 
         return train_loader, test_loader
 
@@ -54,14 +82,6 @@ class CNN2D_Baseline(nn.Module):
             self.checkpoint = torch.load(self.label, weights_only=False)
             self.model.load_state_dict(self.checkpoint['model_state_dict'])
             return
-
-        # Set seeds for reproducibility
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
@@ -79,10 +99,28 @@ class CNN2D_Baseline(nn.Module):
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
 
+                if torch.isnan(X_batch).any() or torch.isinf(X_batch).any():
+                    raise Exception("NaN or Inf detected in input data!")
+
+
+                if torch.isnan(y_batch).any() or torch.isinf(y_batch).any():
+                    raise Exception("NaN or Inf detected in target data!")
+
                 optimizer.zero_grad()
                 preds = self.model(X_batch)
                 loss = criterion(preds, y_batch)
+                if torch.isnan(loss).any() or torch.isinf(loss).any():
+                    raise Exception(f"NaN or Inf detected in loss: {loss.item()}")
+
                 loss.backward()
+
+                for name, param in self.model.named_parameters():
+                    if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                        raise Exception(f"NaN gradient found in: {name}")
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
                 optimizer.step()
 
                 epoch_loss += loss.item() * X_batch.size(0)

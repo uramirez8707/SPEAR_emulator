@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import logging
+import xesmf as xe
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,27 +19,36 @@ class VarData:
 
     self.logger = logging.getLogger(self.varName)
     self.logger.setLevel(log_level)  # Set level from flag
+    self.logger.info(f"Working on var: {self.varName} from {self.fileName}")
 
   def load_data(self):
-    self.logger.info(f"Opening the file for {self.fileName}")
+    self.logger.debug(f"Opening the file for {self.fileName}")
     self.file = xr.open_mfdataset(self.fileName, combine='by_coords')
 
-    self.logger.info(f"Reading data for variable: {self.varName}")
+    self.logger.debug(f"Reading data for variable: {self.varName}")
     self.varData = self.file[self.varName]
+    if self.varData.isnull().any():
+       self.logger.warning("Input data contains null values. Filling with mean.")
 
-    self.logger.info(f"Size of the data: {self.varData.shape}")
+    mean_value = self.varData.mean(skipna=True)
+    self.varData = self.varData.fillna(mean_value)
 
-  def interpolate_data(self, xres=None, yres=None):
+    self.logger.debug(f"Size of the data: {self.varData.shape}")
+
+  def interpolate_data(self, xres=None, yres=None, coarse=False):
     # This is to interpolate data to a coarser grid to make the training faster while developing
-    if xres is None or yres is None:
+    if (xres is None or yres is None) and not coarse:
+      target_grid = get_target_grid()
+      regridder = xe.Regridder(self.varData, target_grid, method="bilinear")
+      self.varData = regridder(self.varData)
       return
 
-    self.logger.info(f"Interpolating data to resolution: {xres}x{yres}")
+    self.logger.debug(f"Coarsing data by: {xres}x{yres}")
     self.varData = self.varData.coarsen(lat=xres, lon=yres, boundary='trim').mean()
-    self.logger.info(f"Size of the data: {self.varData.shape}")
+    self.logger.debug(f"Size of the data: {self.varData.shape}")
 
   def add_spatial_features(self):
-    self.logger.info("Getting spatial features for the dataset")
+    self.logger.debug("Getting spatial features for the dataset")
 
     lat = self.varData.lat.values
     lon = self.varData.lon.values
@@ -60,7 +70,7 @@ class VarData:
     )
 
   def prepare_cnn_input(self):
-    self.logger.info("Combine variable data and spatial encodings")
+    self.logger.debug("Combine variable data and spatial encodings")
 
     data = self.varData.values
     # Repeats the spatial features along the time dimension,
@@ -75,7 +85,7 @@ class VarData:
 
     # Concatenate along channel dimension - new shape: (time, lat, lon, 5)
     cnn_input = np.concatenate([data, spatial], axis=-1)
-    self.logger.info(f"Size of the full data set {cnn_input.shape}")
+    self.logger.debug(f"Size of the full data set {cnn_input.shape}")
     return cnn_input
 
   def create_lagged_samples(self, data, n_lags=3):
@@ -84,7 +94,7 @@ class VarData:
     X: (time - n_lags, n_lags, lat, lon, channels)
     y: (time - n_lags, lat, lon)  (target is the variable only: channel 0)
     """
-    self.logger.info(f"Creating lagged dataset using {n_lags} lags...")
+    self.logger.debug(f"Creating lagged dataset using {n_lags} lags...")
 
     T, H, W, C = data.shape
 
@@ -98,8 +108,8 @@ class VarData:
     X = np.stack(X)  # (samples, n_lags, H, W, C)
     y = np.stack(y)  # (samples, H, W)
 
-    self.logger.info(f"Lagged X shape: {X.shape}")
-    self.logger.info(f"Lagged y shape: {y.shape}")
+    self.logger.debug(f"Lagged X shape: {X.shape}")
+    self.logger.debug(f"Lagged y shape: {y.shape}")
 
     return X, y
 
@@ -112,18 +122,18 @@ class VarData:
     train = data[:split_idx]
     test = data[split_idx:]
 
-    self.logger.info(f"Raw train shape (before scaling & lagging): {train.shape}")
-    self.logger.info(f"Raw test shape  (before scaling & lagging): {test.shape}")
+    self.logger.debug(f"Raw train shape (before scaling & lagging): {train.shape}")
+    self.logger.debug(f"Raw test shape  (before scaling & lagging): {test.shape}")
 
     train_scaled, test_scaled = self.standardize_data(train, test)
 
     X_train_scaled, y_train = self.create_lagged_samples(train_scaled, n_lags=n_lags)
     X_test_scaled,  y_test  = self.create_lagged_samples(test_scaled,  n_lags=n_lags)
 
-    self.logger.info(f"Final X_train shape: {X_train_scaled.shape}")
-    self.logger.info(f"Final y_train shape: {y_train.shape}")
-    self.logger.info(f"Final X_test shape:  {X_test_scaled.shape}")
-    self.logger.info(f"Final y_test shape:  {y_test.shape}")
+    self.logger.debug(f"Final X_train shape: {X_train_scaled.shape}")
+    self.logger.debug(f"Final y_train shape: {y_train.shape}")
+    self.logger.debug(f"Final X_test shape:  {X_test_scaled.shape}")
+    self.logger.debug(f"Final y_test shape:  {y_test.shape}")
 
     y_train_scaled = (y_train - self.scaler.mean_) / self.scaler.std_
     y_test_scaled = (y_test - self.scaler.mean_) / self.scaler.std_
@@ -135,7 +145,7 @@ class VarData:
     Standardize per gridpoint using GridScaler.
     Only applied to channel 0 (the variable).
     """
-    self.logger.info("Using GridScaler for per-grid standardization...")
+    self.logger.debug("Using GridScaler for per-grid standardization...")
 
     # Extract the variable channel (T, H, W)
     var_train = train_data[..., 0]
@@ -165,7 +175,7 @@ class VarData:
         X = X.reshape(samples, H, W, n_lags * C)
         X = X.transpose(0, 3, 1, 2)
 
-        self.logger.info(f"Reshaped size for 2dcnn: {X.shape}")
+        self.logger.debug(f"Reshaped size for 2dcnn: {X.shape}")
         return X
     else:
         raise ValueError("Invalid model_type")
@@ -218,3 +228,16 @@ class GridScaler:
         if self.mean_ is None or self.std_ is None:
             raise RuntimeError("Scaler not fitted yet.")
         return data * self.std_ + self.mean_
+
+
+def get_target_grid():
+  lat_target = np.arange(-89.5, 90.5, 2.0)
+  lon_target = np.arange(0.5, 360.5, 4.0)
+
+  grid_out = xr.Dataset(
+    {
+        "lat": (["lat"], lat_target),
+        "lon": (["lon"], lon_target),
+    }
+  )
+  return grid_out
