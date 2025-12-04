@@ -73,6 +73,8 @@ class VarData:
     self.logger.debug("Combine variable data and spatial encodings")
 
     data = self.varData.values
+    time = self.varData['time'].values
+
     # Repeats the spatial features along the time dimension,
     # so every time step sees the same spatial info.
     spatial = np.broadcast_to(
@@ -86,7 +88,7 @@ class VarData:
     # Concatenate along channel dimension - new shape: (time, lat, lon, 5)
     cnn_input = np.concatenate([data, spatial], axis=-1)
     self.logger.debug(f"Size of the full data set {cnn_input.shape}")
-    return cnn_input
+    return cnn_input, time
 
   def create_lagged_samples(self, data, n_lags=3):
     """
@@ -114,13 +116,14 @@ class VarData:
     return X, y
 
   def split_data(self, test_frac=0.2, n_lags=3):
-    data = self.prepare_cnn_input()
+    data, time = self.prepare_cnn_input()
 
     ntime = data.shape[0]
     split_idx = int(ntime * (1 - test_frac))
 
     train = data[:split_idx]
     test = data[split_idx:]
+    time_test = time[split_idx:]
 
     self.logger.debug(f"Raw train shape (before scaling & lagging): {train.shape}")
     self.logger.debug(f"Raw test shape  (before scaling & lagging): {test.shape}")
@@ -138,7 +141,7 @@ class VarData:
     y_train_scaled = (y_train - self.scaler.mean_) / self.scaler.std_
     y_test_scaled = (y_test - self.scaler.mean_) / self.scaler.std_
 
-    return X_train_scaled, y_train_scaled, X_test_scaled, y_test_scaled,  y_train, y_test
+    return X_train_scaled, y_train_scaled, X_test_scaled, y_test_scaled,  y_train, y_test, time_test
 
   def standardize_data(self, train_data, test_data):
     """

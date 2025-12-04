@@ -170,6 +170,22 @@ class CNN2D_Baseline(nn.Module):
         plt.grid(True)
         plt.show()
 
+    def get_global_rmse_over_time(self, Tas, X_test_scaled, y_test_scaled):
+        self.model.eval()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+
+        X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32).to(device)
+        with torch.no_grad():
+            y_pred_scaled = self.model(X_test_tensor).cpu().numpy()
+
+        # Inverse transform predictions and targets
+        y_pred = Tas.scaler.inverse_transform(y_pred_scaled)
+        y_test = Tas.scaler.inverse_transform(y_test_scaled)
+
+        rmse =  np.sqrt(np.mean((y_pred - y_test)**2, axis=(1,2,3)))
+        return rmse
+    
     def get_rmse(self, Tas, X_test_scaled, y_test_scaled):
         self.model.eval()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
