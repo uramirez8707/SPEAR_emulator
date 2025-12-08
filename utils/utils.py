@@ -9,13 +9,19 @@ logging.basicConfig(
 )
 
 class VarData:
-  def __init__(self, filename, variable, log_level=logging.INFO):
+  def __init__(self, filename, variable, log_level=logging.INFO, add_spatial=True, lag_data_set=True,
+               is_static=False, standardize=True):
     self.fileName = filename
     self.varName = variable
     self.varData = None
     self.file = None
     self.spatial_features = None
     self.scaler = None
+    self.add_spatial = add_spatial
+    self.lag_data_set = lag_data_set
+    self.is_static = is_static
+    self.use_mask = False
+    self.standardize = standardize
 
     self.logger = logging.getLogger(self.varName)
     self.logger.setLevel(log_level)  # Set level from flag
@@ -23,15 +29,13 @@ class VarData:
 
   def load_data(self):
     self.logger.debug(f"Opening the file for {self.fileName}")
-    self.file = xr.open_mfdataset(self.fileName, combine='by_coords')
+    self.file = xr.open_mfdataset(self.fileName, combine='by_coords', decode_timedelta=True)
 
     self.logger.debug(f"Reading data for variable: {self.varName}")
     self.varData = self.file[self.varName]
     if self.varData.isnull().any():
-       self.logger.warning("Input data contains null values. Filling with mean.")
-
-    mean_value = self.varData.mean(skipna=True)
-    self.varData = self.varData.fillna(mean_value)
+      self.logger.warning("Input data contains null values. Filling with 0. Need to mask")
+      self.use_mask = True
 
     self.logger.debug(f"Size of the data: {self.varData.shape}")
 
@@ -48,6 +52,10 @@ class VarData:
     self.logger.debug(f"Size of the data: {self.varData.shape}")
 
   def add_spatial_features(self):
+    if not self.add_spatial:
+       self.logger.debug("Not getting spatial features for the dataset")
+       return
+
     self.logger.debug("Getting spatial features for the dataset")
 
     lat = self.varData.lat.values
@@ -73,20 +81,21 @@ class VarData:
     self.logger.debug("Combine variable data and spatial encodings")
 
     data = self.varData.values
-    time = self.varData['time'].values
+    if not self.is_static:
+       time = self.varData['time'].values
+    else:
+       time = None
 
-    # Repeats the spatial features along the time dimension,
-    # so every time step sees the same spatial info.
-    spatial = np.broadcast_to(
+    if self.add_spatial:
+      spatial = np.broadcast_to(
         self.spatial_features,
         data.shape + (self.spatial_features.shape[-1],)
-    )
+      )
+      data = data[..., np.newaxis]
+      cnn_input = np.concatenate([data, spatial], axis=-1)
+    else:
+      cnn_input = data[..., np.newaxis]
 
-    # Reshapes data to (time, lat, lon, 1) — one channel for the variable
-    data = data[..., np.newaxis]  # (time, lat, lon, 1)
-
-    # Concatenate along channel dimension - new shape: (time, lat, lon, 5)
-    cnn_input = np.concatenate([data, spatial], axis=-1)
     self.logger.debug(f"Size of the full data set {cnn_input.shape}")
     return cnn_input, time
 
@@ -103,9 +112,15 @@ class VarData:
     X = []
     y = []
 
-    for t in range(n_lags, T):
+    if self.lag_data_set:
+      for t in range(n_lags, T):
         X.append(data[t - n_lags:t])   # stack lagged steps
         y.append(data[t, ..., 0])      # predict channel 0 (the variable)
+    else:
+       for t in range(n_lags, T):
+        X.append(data[t][np.newaxis, ...])   # stack lagged steps
+        y.append(data[t, ..., 0])      # predict channel 0 (the variable)
+
 
     X = np.stack(X)  # (samples, n_lags, H, W, C)
     y = np.stack(y)  # (samples, H, W)
@@ -116,6 +131,11 @@ class VarData:
     return X, y
 
   def split_data(self, test_frac=0.2, n_lags=3):
+    if self.is_static:
+       data = self.varData.values
+       data = data[np.newaxis, np.newaxis, ...]
+       return data
+
     data, time = self.prepare_cnn_input()
 
     ntime = data.shape[0]
@@ -138,33 +158,53 @@ class VarData:
     self.logger.debug(f"Final X_test shape:  {X_test_scaled.shape}")
     self.logger.debug(f"Final y_test shape:  {y_test.shape}")
 
-    y_train_scaled = (y_train - self.scaler.mean_) / self.scaler.std_
-    y_test_scaled = (y_test - self.scaler.mean_) / self.scaler.std_
+    if self.standardize:
+      y_train_scaled = (y_train - self.scaler.mean_) / self.scaler.std_
+      y_test_scaled = (y_test - self.scaler.mean_) / self.scaler.std_
+    else:
+      y_train_scaled = y_train
+      y_test_scaled = y_test
+
+    if self.use_mask:
+      X_train_scaled = np.nan_to_num(X_train_scaled, nan=0.0)
+      y_train_scaled = np.nan_to_num(y_train_scaled, nan=0.0)
+      X_test_scaled = np.nan_to_num(X_test_scaled, nan=0.0)
+      y_test_scaled = np.nan_to_num(y_test_scaled, nan=0.0)
+      y_train = np.nan_to_num(X_train_scaled, nan=0.0)
+      y_test = np.nan_to_num(X_train_scaled, nan=0.0)
 
     return X_train_scaled, y_train_scaled, X_test_scaled, y_test_scaled,  y_train, y_test, time_test
+
+  def clean_variables(self, variable):
+    if self.use_mask:
+      variable = np.nan_to_num(variable, nan=0.0)
+    return variable
 
   def standardize_data(self, train_data, test_data):
     """
     Standardize per gridpoint using GridScaler.
     Only applied to channel 0 (the variable).
     """
-    self.logger.debug("Using GridScaler for per-grid standardization...")
 
     # Extract the variable channel (T, H, W)
     var_train = train_data[..., 0]
     var_test = test_data[..., 0]
 
-    # Create scaler and fit on train only
-    self.scaler = GridScaler()
-    var_train_scaled = self.scaler.fit_transform(var_train)
-    var_test_scaled = self.scaler.transform(var_test)
-
     # Replace only channel 0 (other channels untouched)
     train_scaled = train_data.copy()
     test_scaled = test_data.copy()
 
-    train_scaled[..., 0] = var_train_scaled
-    test_scaled[..., 0] = var_test_scaled
+    if self.standardize:
+      self.logger.debug("Using GridScaler for per-grid standardization...")
+
+      self.scaler = GridScaler()
+      var_train_scaled = self.scaler.fit_transform(var_train)
+      var_test_scaled = self.scaler.transform(var_test)
+
+      train_scaled[..., 0] = var_train_scaled
+      test_scaled[..., 0] = var_test_scaled
+    else:
+       self.logger.debug("Assuming data is already standardized...")
 
     return train_scaled, test_scaled
 
