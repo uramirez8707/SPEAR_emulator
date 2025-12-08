@@ -5,6 +5,8 @@ from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 from pathlib import Path
 from architectures.Models import get_model_archirecture
+import cartopy.crs as ccrs
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import random
 import numpy as np
@@ -186,7 +188,7 @@ class CNN2D_Baseline(nn.Module):
         rmse =  np.sqrt(np.mean((y_pred - y_test)**2, axis=(1,2,3)))
         return rmse
     
-    def get_rmse(self, Tas, X_test_scaled, y_test_scaled):
+    def get_rmse(self, Tas, X_test_scaled, y_test_scaled, ranges=None):
         self.model.eval()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
@@ -210,22 +212,72 @@ class CNN2D_Baseline(nn.Module):
 
         print(f"Global Persistence RMSE (K): {persistence_rmse:.6f}")
 
+        # Calculate grid-wise RMSE (axis=0 averages over the time dimension)
         rmse_model = np.sqrt(np.mean((y_pred - y_test)**2, axis=0)).squeeze()
         rmse_persistence = np.sqrt(np.mean((persistence_pred - y_test)**2, axis=0)).squeeze()
 
-        vmin = rmse_persistence.min()
-        vmax = rmse_persistence.max()
+        lon = Tas.varData.lon # e.g., numpy array of longitudes
+        lat = Tas.varData.lat # e.g., numpy array of latitudes
 
-        fig, axs = plt.subplots(1, 2, figsize=(14,5), constrained_layout=True)
+        combined_min = min(rmse_model.min(), rmse_persistence.min())
+        combined_max = max(rmse_model.max(), rmse_persistence.max())
+        vmin = combined_min
+        vmax = combined_max
 
-        # Model RMSE
-        im0 = axs[0].imshow(rmse_model, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
-        axs[0].set_title("CNN Model RMSE")
-        plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
+        if ranges is not None:
+            vmin = ranges[0]
+            vmax = ranges[1]
+        else:
+            ranges = (vmin, vmax)
 
-        # Persistence RMSE
-        im1 = axs[1].imshow(rmse_persistence, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
-        axs[1].set_title("Persistence RMSE")
-        plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
+        # Setup the figure and map projection
+        fig = plt.figure(figsize=(14, 6))
+
+        # Define the map projection (e.g., PlateCarree is a common choice)
+        projection = ccrs.PlateCarree()
+        
+        # --- Model RMSE Plot ---
+        ax0 = fig.add_subplot(1, 2, 1, projection=projection)
+
+        # Plot the data using pcolormesh
+        im0 = ax0.pcolormesh(
+            lon, lat, rmse_model,
+            transform=projection,
+            cmap='viridis',
+            vmin=vmin, vmax=vmax
+        )
+
+        ax0.set_title("CNN Model RMSE (K)")
+        ax0.coastlines(resolution='50m') # Add coastlines
+        ax0.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False) # Add gridlines
+
+        # Add a colorbar
+        divider0 = make_axes_locatable(ax0)
+        cax0 = divider0.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
+        plt.colorbar(im0, cax=cax0, orientation='vertical', label='RMSE (K)')
+
+        # --- Persistence RMSE Plot ---
+        ax1 = fig.add_subplot(1, 2, 2, projection=projection)
+
+        # Plot the data using pcolormesh
+        im1 = ax1.pcolormesh(
+            lon, lat, rmse_persistence,
+            transform=projection,
+            cmap='viridis',
+            vmin=vmin, vmax=vmax # Use the shared vmin/vmax
+        )
+
+        ax1.set_title("Persistence RMSE (K)")
+        ax1.coastlines(resolution='50m') # Add coastlines
+        ax1.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False) # Add gridlines
+
+        # Add a colorbar
+        divider1 = make_axes_locatable(ax1)
+        cax1 = divider1.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
+        plt.colorbar(im1, cax=cax1, orientation='vertical', label='RMSE (K)')
+
+        # Tight layout adjusted for subplots with colorbars
+        fig.tight_layout(rect=[0, 0, 1, 1])
 
         plt.show()
+        return ranges
