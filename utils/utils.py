@@ -78,7 +78,7 @@ class VarData:
     )
 
   def prepare_cnn_input(self):
-    self.logger.debug("Combine variable data and spatial encodings")
+    self.logger.debug("Preparing input for CNN")
 
     data = self.varData.values
     if not self.is_static:
@@ -86,15 +86,7 @@ class VarData:
     else:
        time = None
 
-    if self.add_spatial:
-      spatial = np.broadcast_to(
-        self.spatial_features,
-        data.shape + (self.spatial_features.shape[-1],)
-      )
-      data = data[..., np.newaxis]
-      cnn_input = np.concatenate([data, spatial], axis=-1)
-    else:
-      cnn_input = data[..., np.newaxis]
+    cnn_input = data[..., np.newaxis]
 
     self.logger.debug(f"Size of the full data set {cnn_input.shape}")
     return cnn_input, time
@@ -217,6 +209,13 @@ class VarData:
         X = X.transpose(0, 2, 3, 1, 4)  # (samples, H, W, n_lags, C)
         X = X.reshape(samples, H, W, n_lags * C)
         X = X.transpose(0, 3, 1, 2)
+
+        if self.add_spatial:
+           nx, ny, nchannels = self.spatial_features.shape
+           nsamples = X.shape[0]
+           spatial_features = self.spatial_features.reshape(1, nchannels, nx, ny)
+           spatial_features = np.repeat(spatial_features, repeats=nsamples, axis=0)
+           X = np.concatenate([X, spatial_features], axis=1)
 
         self.logger.debug(f"Reshaped size for 2dcnn: {X.shape}")
         return X
