@@ -10,7 +10,7 @@ logging.basicConfig(
 
 class VarData:
   def __init__(self, filename, variable, log_level=logging.INFO, add_spatial=True, lag_data_set=True,
-               is_static=False, standardize=True):
+               is_static=False, standardize=True, fill_value_method=None):
     self.fileName = filename
     self.varName = variable
     self.varData = None
@@ -22,6 +22,7 @@ class VarData:
     self.is_static = is_static
     self.use_mask = False
     self.standardize = standardize
+    self.fill_value_method = fill_value_method
 
     self.logger = logging.getLogger(self.varName)
     self.logger.setLevel(log_level)  # Set level from flag
@@ -158,6 +159,15 @@ class VarData:
       y_test_scaled = y_test
 
     if self.use_mask:
+      if self.fill_value_method == "topomask":
+         self.logger.debug("Adding a topography mask")
+
+         X_train_scaled = self.get_mask(X_train_scaled)
+         X_test_scaled = self.get_mask(X_test_scaled)
+
+         self.logger.debug(f"X train after appending a mask: {X_train_scaled.shape}")
+         self.logger.debug(f"X train after appending a mask: {X_test_scaled.shape}")
+
       X_train_scaled = np.nan_to_num(X_train_scaled, nan=0.0)
       y_train_scaled = np.nan_to_num(y_train_scaled, nan=0.0)
       X_test_scaled = np.nan_to_num(X_test_scaled, nan=0.0)
@@ -167,10 +177,12 @@ class VarData:
 
     return X_train_scaled, y_train_scaled, X_test_scaled, y_test_scaled,  y_train, y_test, time_test
 
-  def clean_variables(self, variable):
-    if self.use_mask:
-      variable = np.nan_to_num(variable, nan=0.0)
-    return variable
+  def get_mask(self, x_in):
+     data_slice = x_in[:, 0, :, :, 0]
+     data_slice = data_slice[:, None, :, :, None]
+     mask = np.isnan(data_slice)
+     x_out = np.concatenate((x_in, mask), axis=1)
+     return x_out
 
   def standardize_data(self, train_data, test_data):
     """
@@ -283,3 +295,64 @@ def get_target_grid():
     }
   )
   return grid_out
+
+
+def process_variable(file_path, var_name, lag_data_set, add_spatial, is_static, standardize, fill_value_method):
+    var = VarData(file_path, var_name, lag_data_set=lag_data_set, add_spatial=add_spatial, is_static=is_static,
+                  standardize=standardize, fill_value_method=fill_value_method)
+    var.load_data()
+    var.interpolate_data()
+    var.add_spatial_features()
+
+    if is_static:
+        X_train_scaled = var.split_data()
+        X_test_scaled = X_train_scaled
+        out = {'varname': var_name,
+               'X_train_scaled':X_train_scaled,
+               'X_test_scaled':X_train_scaled,
+              }
+    else:
+        X_train_scaled, y_train_scaled, X_test_scaled, y_test_scaled, y_train, y_test, time = var.split_data()
+
+        # Reshape X_train and X_test for a 2D conv (i.e (N_samples, lags*5, lat, lon))
+        X_train_scaled = var.reshape_for_model(X_train_scaled, model_type="2dcnn")
+        X_test_scaled = var.reshape_for_model(X_test_scaled, model_type="2dcnn")
+
+        # Reshape y_train and y_test to be consistent (i.e (N_samples, 1, lat, lon))
+        y_train_scaled = y_train_scaled[:, None, :, :]
+        y_test_scaled  = y_test_scaled[:, None, :, :]
+
+    var.logger.info(f"X_train_scaled : {X_train_scaled.shape}")
+    var.logger.info(f"X_test_scaled : {X_test_scaled.shape}")
+
+    if var_name == "t_ref":
+        out = {'varname': var_name,
+               'X_train_scaled':X_train_scaled,
+               'X_test_scaled':X_test_scaled,
+               'y_train_scaled':y_train_scaled,
+               'y_test_scaled':y_test_scaled,
+               'y_train':y_train,
+               'y_test':y_test,
+               'tas_data':var,
+               'time':time
+              }
+        var.logger.info(f"y_train_scaled : {y_train_scaled.shape}")
+        var.logger.info(f"y_test_scaled : {y_test_scaled.shape}")
+        var.logger.info(f"y_train : {y_train.shape}")
+        var.logger.info(f"y_test : {y_test.shape}")
+    elif not is_static:
+        out = {'varname': var_name,
+               'X_train_scaled':X_train_scaled,
+               'X_test_scaled':X_test_scaled,
+              }
+
+    return out
+
+
+def get_indices(variable_data, variable_names):
+   out = []
+   for variable in variable_data:
+      variable_name = variable['varname']
+      if variable_name in variable_names:
+         out.append((variable['start'], variable['end']))
+   return out
