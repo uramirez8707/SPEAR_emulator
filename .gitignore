@@ -95,3 +95,5 @@ dmypy.json
 RawData/
 DATA/
 .results/
+.ipynb_checkpoints/
+wut
