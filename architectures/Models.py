@@ -1,13 +1,13 @@
 import torch.nn as nn
 
-def get_model_archirecture(case, in_channels):
+def get_model_archirecture(case, in_channels, out_channels=1):
     if case == 0:
         model = nn.Sequential(
             nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 1, kernel_size=3, padding=1)  # output 1 channel, same HxW
+            nn.Conv2d(32, out_channels, kernel_size=3, padding=1)  # output 1 channel, same HxW
         )
     elif case == 1:
         model = nn.Sequential(
@@ -17,7 +17,7 @@ def get_model_archirecture(case, in_channels):
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 1, kernel_size=3, padding=1)  # output 1 channel, same HxW
+            nn.Conv2d(32, out_channels, kernel_size=3, padding=1)  # output 1 channel, same HxW
         )
     elif case == 2:
         model = nn.Sequential(
@@ -53,7 +53,7 @@ def get_model_archirecture(case, in_channels):
             nn.ReLU(),
 
             # Final output
-            nn.Conv2d(16, 1, kernel_size=3, padding=1)
+            nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
         )
 
     return model

@@ -297,7 +297,8 @@ def get_target_grid():
   return grid_out
 
 
-def process_variable(file_path, var_name, lag_data_set, add_spatial, is_static, standardize, fill_value_method):
+def process_variable(file_path, var_name, lag_data_set, add_spatial, is_static, standardize, fill_value_method,
+                     isOutput=False):
     var = VarData(file_path, var_name, lag_data_set=lag_data_set, add_spatial=add_spatial, is_static=is_static,
                   standardize=standardize, fill_value_method=fill_value_method)
     var.load_data()
@@ -334,12 +335,23 @@ def process_variable(file_path, var_name, lag_data_set, add_spatial, is_static, 
                'y_train':y_train,
                'y_test':y_test,
                'tas_data':var,
-               'time':time
+               'time':time,
+               'is_output': True
               }
         var.logger.info(f"y_train_scaled : {y_train_scaled.shape}")
         var.logger.info(f"y_test_scaled : {y_test_scaled.shape}")
         var.logger.info(f"y_train : {y_train.shape}")
         var.logger.info(f"y_test : {y_test.shape}")
+    elif isOutput:
+        var.logger.info(f"y_train_scaled : {y_train_scaled.shape}")
+        var.logger.info(f"y_test_scaled : {y_test_scaled.shape}")
+        out = {'varname': var_name,
+               'X_train_scaled':X_train_scaled,
+               'X_test_scaled':X_test_scaled,
+               'y_test_scaled':y_test_scaled,
+               'y_train_scaled':y_train_scaled,
+               'is_output': True
+              }
     elif not is_static:
         out = {'varname': var_name,
                'X_train_scaled':X_train_scaled,

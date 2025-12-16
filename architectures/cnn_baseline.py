@@ -23,10 +23,10 @@ def set_seed(seed=42):
 
 
 class CNN2D_Baseline(nn.Module):
-    def __init__(self, in_channels, case=0, label="baseline"):
+    def __init__(self, in_channels, case=0, label="baseline", out_channels=1, out_var_maps=None):
         super(CNN2D_Baseline, self).__init__()
 
-        self.model = get_model_archirecture(case, in_channels)
+        self.model = get_model_archirecture(case, in_channels, out_channels=out_channels)
 
         print("Model Architecture:")
         print(self.model)
@@ -37,6 +37,7 @@ class CNN2D_Baseline(nn.Module):
         self.y_train = None
         self.checkpoint = None
         self.label = f".results/{label}.pt"
+        self.out_var_maps = out_var_maps
 
     def forward(self, x):
         return self.model(x)
@@ -78,7 +79,7 @@ class CNN2D_Baseline(nn.Module):
 
         return train_loader, test_loader
 
-    def train_model(self, train_loader, test_loader, num_epochs=50, lr=1e-3, seed=42):
+    def train_model(self, train_loader, test_loader, num_epochs=50, lr=1e-3):
         path = Path(self.label)
         if path.exists():
             self.checkpoint = torch.load(self.label, weights_only=False)
@@ -101,24 +102,13 @@ class CNN2D_Baseline(nn.Module):
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
 
-                if torch.isnan(X_batch).any() or torch.isinf(X_batch).any():
-                    raise Exception("NaN or Inf detected in input data!")
-
-
-                if torch.isnan(y_batch).any() or torch.isinf(y_batch).any():
-                    raise Exception("NaN or Inf detected in target data!")
-
                 optimizer.zero_grad()
                 preds = self.model(X_batch)
-                loss = criterion(preds, y_batch)
-                if torch.isnan(loss).any() or torch.isinf(loss).any():
-                    raise Exception(f"NaN or Inf detected in loss: {loss.item()}")
-
+                if self.out_var_maps is None:
+                    loss = criterion(preds, y_batch)
+                else:
+                    loss = self.get_combined_loss(preds, y_batch, criterion)
                 loss.backward()
-
-                for name, param in self.model.named_parameters():
-                    if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
-                        raise Exception(f"NaN gradient found in: {name}")
 
                 # Gradient clipping
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -137,7 +127,10 @@ class CNN2D_Baseline(nn.Module):
                     X_val = X_val.to(device)
                     y_val = y_val.to(device)
                     preds = self.model(X_val)
-                    val_loss += criterion(preds, y_val).item() * X_val.size(0)
+                    if self.out_var_maps is None:
+                        val_loss += criterion(preds, y_val).item() * X_val.size(0)
+                    else:
+                        val_loss += self.get_combined_loss(preds, y_val, criterion) * X_val.size(0)
 
             val_loss /= len(test_loader.dataset)
             validation_loss.append(val_loss)
@@ -151,7 +144,8 @@ class CNN2D_Baseline(nn.Module):
             'optimizer_state_dict': optimizer.state_dict(),
             'training_loss': training_loss,
             'validation_loss': validation_loss,
-            'num_epochs': num_epochs
+            'num_epochs': num_epochs,
+            'mappings': self.out_var_maps
         }
 
         torch.save(self.checkpoint, self.label)
@@ -281,3 +275,13 @@ class CNN2D_Baseline(nn.Module):
 
         plt.show()
         return ranges
+    
+    def get_combined_loss(self, pred, target, criterion):
+        loss = 0
+        for variable in self.out_var_maps:
+            var_pred = pred[:, variable['out_channel'], :, :]
+            var_target = target[:, variable['out_channel'], :, :]
+            var_loss = criterion(var_pred, var_target)
+            variable['loss'] += var_loss
+            loss += var_loss
+        return loss
