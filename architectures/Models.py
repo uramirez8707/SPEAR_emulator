@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-def get_model_archirecture(case, in_channels, out_channels=1):
+def get_model_archirecture(case, in_channels, out_channels):
     if case == 0:
         model = nn.Sequential(
             nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
