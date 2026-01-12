@@ -34,7 +34,7 @@ class VarSet:
         self.procress_variable()
 
     def get_data_set(self, var_name):
-        valid_names = ["training", "validating", "testing", "spatial_features"]
+        valid_names = ["training", "validating", "testing", "spatial_features", "wet"]
         if var_name not in valid_names:
            raise RuntimeError(f"get_data_set:: {var_name} is not valid. It must be {valid_names}")
         self.logger.debug(f"Getting the {var_name} data")
@@ -46,6 +46,7 @@ class VarSet:
     def lag_data_set(self, data, n_lags=3):
         data_np = data.values
 
+        y = None
         X = sliding_window_view(data_np, window_shape=n_lags, axis=0)
         X = np.moveaxis(X, -1, 1)
         X = X[:-1]
@@ -149,6 +150,9 @@ class DataSet:
             self.logger.debug(variable.standardization_info)
 
     def append_static_variable(self, variable):
+        if 'sample' in variable.x_train.dims:
+            return
+
         nsamples = self.x_train.shape[0]
         variable.x_train = variable.x_train.expand_dims(sample=nsamples)
         self.x_train = np.concatenate([self.x_train, variable.x_train], axis=1)
