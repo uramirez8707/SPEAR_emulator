@@ -61,7 +61,7 @@ class CNN2D(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-    
+
     def train(self):
         # Check if a model already exists, load it and move on to testing:
         path = Path(self.label)
@@ -192,7 +192,7 @@ class CNN2D(nn.Module):
             if target == info['var_name']:
                 return info['mean'], info['std']
         raise RuntimeError(f"Unable to find the get_standardization_info for {target}")
-    
+
     def get_var_units(self, target):
         for info in self.data.standardization_info:
             if target == info['var_name']:
@@ -206,10 +206,15 @@ class CNN2D(nn.Module):
             mean, std = self.get_standardization_info(target)
             y_inv[:, i, :, :] = y[:, i, :, :] * std + mean
         return y_inv
-    
-    def calculate_RMSE(self):
-        self.RMSE = []
-        err = self.y_pred - self.y_test
+
+    def calculate_RMSE(self, y_pred=None):
+        RMSE = []
+        if y_pred is None:
+            y_predicted = self.y_pred
+        else:
+            y_predicted = y_pred
+
+        err = y_predicted - self.y_test
         for i, target in enumerate(self.targets):
             target_err = err[:, i, :, :]
             target_rmse = {}
@@ -219,8 +224,58 @@ class CNN2D(nn.Module):
             target_rmse['Over time'] = np.sqrt(np.mean(target_err ** 2, axis=(1,2)))
             target_rmse['Variable units'] = self.get_var_units(target)
 
-            self.RMSE.append(target_rmse)
+            RMSE.append(target_rmse)
             self.logger.debug(f"Global RMSE: {target} :: {target_rmse['Global']}")
+
+        if y_pred is None:
+            self.RMSE = RMSE
+
+        return RMSE
+
+
+    def inference(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.eval()
+        self.model.to(device)
+
+        y_test = torch.tensor(self.y_test, dtype=torch.float32).to(device) # (physical units)
+        x_test = torch.tensor(self.data.x_test, dtype=torch.float32).to(device) # (normalized)
+        mappings = self.get_mappings()
+
+        nsteps = y_test.shape[0]
+        self.logger.debug(f"Doing inference for {nsteps} time steps")
+
+        y_prediction = torch.zeros_like(y_test)
+        with torch.no_grad():
+            X = x_test[0:1] # Initial condition
+
+            for t in range(nsteps):
+                y = self.model(X)
+                y_prediction[t] = y[0] # Save the prediction
+
+                if t == nsteps - 1:
+                    break
+
+                # Copy the data for the next time step
+                X_next = x_test[t+1:t+2].clone()
+
+                # Overwrite ONLY the targets that were predicted
+                for i, target in enumerate(self.targets):
+                    lag_indices = mappings[i]
+
+                    for j in range(len(lag_indices) - 1):
+                        X_next[:, lag_indices[j]] = X[:, lag_indices[j + 1]]
+                    X_next[:, lag_indices[-1]] = y[:, i]
+                X = X_next
+
+        return y_prediction.numpy()
+
+    def get_mappings(self):
+        mappings = []
+        for target in self.targets:
+            indices = [i for i, s in enumerate(self.data.x_description) if target in s]
+            mappings.append(indices)
+        return mappings
 
     def get_persistence_RMSE(self):
         persistence_results = []
@@ -246,7 +301,7 @@ class CNN2D(nn.Module):
         targets = [f"{d['Target']}\n({d.get('Variable units', 'no units')})" for d in self.RMSE]
         model_rmse = [d['Global'] for d in self.RMSE]
         pers_rmse = [d['Global'] for d in persistence_RMSE]
-        
+
         x = np.arange(len(targets))
         width = 0.35
 
@@ -322,9 +377,9 @@ class CNN2D(nn.Module):
             ax1.set_title(f'Global RMSE over Time - {target}')
             ax1.grid(True, alpha=0.3)
 
-            ax2.plot(time_converted, actual_series, label='Actual (Global Mean)', 
+            ax2.plot(time_converted, actual_series, label='Actual (Global Mean)',
                  color='black', linestyle='--', alpha=0.7)
-            ax2.plot(time_converted, pred_series, label='Predicted (Global Mean)', 
+            ax2.plot(time_converted, pred_series, label='Predicted (Global Mean)',
                  color='tab:blue', linewidth=1.5)
             ax2.set_title(f'Global {target} over Time')
             ax2.set_ylabel(f"{target} ({target_rmse['Variable units']})")
@@ -334,7 +389,7 @@ class CNN2D(nn.Module):
 
             plt.tight_layout()
             plt.show()
-    
+
 
     def save_checkpoint(self, train_losses, val_losses):
         self.train_losses = train_losses
@@ -366,7 +421,7 @@ class CNN2D(nn.Module):
 
         train_ds = TensorDataset(x_train_t, Y_train_t)
         validate_ds = TensorDataset(x_validate_t, Y_validate_t)
-        
+
         train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True,
                                   generator=g,
                                   worker_init_fn=worker_init_fn,
@@ -375,9 +430,9 @@ class CNN2D(nn.Module):
                                  generator=g2,
                                  worker_init_fn=worker_init_fn,
                                  num_workers=0)
-        
+
         return train_loader, validate_loader
-    
+
 
 def plot_subplot(ax, lon, lat, data, title, colorbar_label, vmin, vmax, cmap='viridis'):
     """
