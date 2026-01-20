@@ -150,9 +150,8 @@ class CNN2D(nn.Module):
         self.save_checkpoint(epoch_train_losses, epoch_val_losses)
         self.logger.info("Training completed.")
 
-
     def plot_loss_over_epochs(self):
-        plt.figure(figsize=(12,5))
+        plt.figure(figsize=(12, 6))
 
         prop_cycle = plt.rcParams['axes.prop_cycle']
         colors = prop_cycle.by_key()['color']
@@ -160,19 +159,25 @@ class CNN2D(nn.Module):
         for i, target in enumerate(self.targets):
             color = colors[i % len(colors)]
 
-            val_losses = self.val_losses[target]
-            plt.plot(val_losses, label=f'Validation Loss - {target}',
-                     color=color, linestyle='--', alpha=0.8)
             train_losses = self.train_losses[target]
-            plt.plot(train_losses, label=f'Training Loss - {target}',
+            val_losses = self.val_losses[target]
+            epochs = range(len(train_losses))
+
+            plt.plot(epochs, train_losses, label=f'Training Loss - {target}',
                      color=color, linestyle='-', linewidth=2)
 
+            plt.plot(epochs, val_losses, label=f'Validation Loss - {target}',
+                     color=color, linestyle='--', alpha=0.8)
+
         plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.ylim(0, 1)
-        plt.title("Loss over epoch")
-        plt.legend()
-        plt.grid(True)
+        plt.ylabel("Loss (Log Scale)")
+        plt.title("Model Convergence: Loss over Epochs")
+
+        plt.yscale('log')
+        plt.ylim(bottom=min(min(self.train_losses[t]) for t in self.targets) * 0.8, top=0.5)
+        plt.grid(True, which="both", linestyle="--", alpha=0.4)
+        plt.legend(loc='upper right', frameon=True)
+        plt.tight_layout()
         plt.show()
 
     def test_model(self):
