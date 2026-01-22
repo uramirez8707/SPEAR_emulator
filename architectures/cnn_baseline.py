@@ -458,17 +458,14 @@ class Results:
                         l = min(variable['temporal_RMSE'])
                         u = max(variable['temporal_RMSE'])
 
-                    ax.set_title(f"{Model.label}")
+                    ax.set_title(f"{target}: Global RMSE for {Model.label} Model")
                     ax.set_ylim(l, u)
                     ax.grid(True, alpha=0.3)
+                    ax.set_ylabel(f"RMSE ({units})")
                     ax.plot(time_converted[i:], variable['temporal_RMSE'], linestyle='dashed', marker='o')
             if not found:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 
-        plt.ylabel(f"RMSE ({units})")
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        
-        plt.title(f"Global RMSE Comparison by Model and {target}")
         plt.tight_layout()
         plt.show()
 
