@@ -13,6 +13,7 @@ import cftime
 
 import random
 import numpy as np
+import pandas as pd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +42,8 @@ class CNN2D(nn.Module):
         self.out_channels = data.Y_train.shape[1]
 
         self.model = get_model_archirecture(case, self.in_channels, self.out_channels)
-        self.label = f".results/{label}.pt"
+        self.label = label
+        self.out_path = f".results/{label}.pt"
         self.data = data
         self.batch_size = batch_size
         self.num_epochs = num_epochs
@@ -64,9 +66,9 @@ class CNN2D(nn.Module):
 
     def train(self):
         # Check if a model already exists, load it and move on to testing:
-        path = Path(self.label)
+        path = Path(self.out_path)
         if path.exists():
-            self.checkpoint = torch.load(self.label, weights_only=False)
+            self.checkpoint = torch.load(self.out_path, weights_only=False)
             self.model.load_state_dict(self.checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(self.checkpoint['optimizer_state_dict'])
             self.val_losses = self.checkpoint['val_losses']
@@ -180,7 +182,7 @@ class CNN2D(nn.Module):
         plt.tight_layout()
         plt.show()
 
-    def test_model(self):
+    def predict_with_ground_truth(self):
         self.model.eval()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
@@ -189,61 +191,21 @@ class CNN2D(nn.Module):
         with torch.no_grad():
             y_pred = self.model(x_test).cpu().numpy()
 
-        self.y_pred = self.inverse_transform(y_pred)
-        self.y_test = self.inverse_transform(self.data.Y_test)
-
-    def get_standardization_info(self, target):
-        for info in self.data.standardization_info:
-            if target == info['var_name']:
-                return info['mean'], info['std']
-        raise RuntimeError(f"Unable to find the get_standardization_info for {target}")
-
-    def get_var_units(self, target):
-        for info in self.data.standardization_info:
-            if target == info['var_name']:
-                return info['original_units']
-
-        raise RuntimeError(f"Unable to find orginial units for {target}")
-
-    def inverse_transform(self, y):
-        y_inv = y.copy()
-        for i, target in enumerate(self.targets):
-            mean, std = self.get_standardization_info(target)
-            y_inv[:, i, :, :] = y[:, i, :, :] * std + mean
-        return y_inv
-
-    def calculate_RMSE(self, y_pred=None):
-        RMSE = []
-        if y_pred is None:
-            y_predicted = self.y_pred
-        else:
-            y_predicted = y_pred
-
-        err = y_predicted - self.y_test
-        for i, target in enumerate(self.targets):
-            target_err = err[:, i, :, :]
-            target_rmse = {}
-            target_rmse['Target'] = target
-            target_rmse['Global'] = np.sqrt(np.mean(target_err**2))
-            target_rmse['Per grid point'] = np.sqrt(np.mean(target_err ** 2, axis=0))
-            target_rmse['Over time'] = np.sqrt(np.mean(target_err ** 2, axis=(1,2)))
-            target_rmse['Variable units'] = self.get_var_units(target)
-
-            RMSE.append(target_rmse)
-            self.logger.debug(f"Global RMSE: {target} :: {target_rmse['Global']}")
-
-        if y_pred is None:
-            self.RMSE = RMSE
-
-        return RMSE
-
-
-    def inference(self):
+        # Get back to physical units:
+        y_pred = self.inverse_transform(y_pred)
+        y_test = self.inverse_transform(self.data.Y_test)
+        label = self.label
+        output = ModelOutput(label, y_test, y_pred,
+                            self.targets, self.data.standardization_info)
+    
+        return output
+    
+    def forecast_rollout(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.eval()
         self.model.to(device)
 
-        y_test = torch.tensor(self.y_test, dtype=torch.float32).to(device) # (physical units)
+        y_test = torch.tensor(self.data.Y_test, dtype=torch.float32).to(device) # (physical units)
         x_test = torch.tensor(self.data.x_test, dtype=torch.float32).to(device) # (normalized)
         mappings = self.get_mappings()
 
@@ -273,7 +235,36 @@ class CNN2D(nn.Module):
                     X_next[:, lag_indices[-1]] = y[:, i]
                 X = X_next
 
-        return y_prediction.numpy()
+        y_prediction = y_prediction.numpy()
+        
+        # Convert back to physical units
+        y_prediction = self.inverse_transform(y_prediction)
+        y_test = self.inverse_transform(self.data.Y_test)
+        label = f"{self.label}"
+        output = ModelOutput(label, y_test, y_prediction,
+                            self.targets, self.data.standardization_info)
+    
+        return output
+
+    def get_standardization_info(self, target):
+        for info in self.data.standardization_info:
+            if target == info['var_name']:
+                return info['mean'], info['std']
+        raise RuntimeError(f"Unable to find the get_standardization_info for {target}")
+
+    def get_var_units(self, target):
+        for info in self.data.standardization_info:
+            if target == info['var_name']:
+                return info['original_units']
+
+        raise RuntimeError(f"Unable to find orginial units for {target}")
+
+    def inverse_transform(self, y):
+        y_inv = y.copy()
+        for i, target in enumerate(self.targets):
+            mean, std = self.get_standardization_info(target)
+            y_inv[:, i, :, :] = y[:, i, :, :] * std + mean
+        return y_inv
 
     def get_mappings(self):
         mappings = []
@@ -282,119 +273,17 @@ class CNN2D(nn.Module):
             mappings.append(indices)
         return mappings
 
-    def get_persistence_RMSE(self):
-        persistence_results = []
-        for i, target in enumerate(self.targets):
-            y_actual = self.y_test[1:, i, :, :]
-            y_persistence = self.y_test[:-1, i, :, :]
+    def get_persistence_baseline(self):
+        y_actual = self.data.Y_test[1:, :, :, :]
+        y_persistence = self.data.Y_test[:-1, :, :, :]
 
-            global_persistence_rmse = np.sqrt(np.mean((y_actual - y_persistence)**2))
-            time_persistence_rmse = np.sqrt(np.mean((y_actual - y_persistence)**2, axis=(1, 2)))
-            grid_persistence_rmse = np.sqrt(np.mean((y_actual - y_persistence)**2, axis=0))
+        # Get back to physical units:
+        y_actual = self.inverse_transform(y_actual)
+        y_persistence = self.inverse_transform(y_persistence)
 
-            persistence_results.append({
-                'Target': target,
-                'Global': global_persistence_rmse,
-                'Over time': time_persistence_rmse,
-                'Per grid point': grid_persistence_rmse
-            })
-
-            print(f"Persistence - Global RMSE: {target} :: {global_persistence_rmse}")
+        persistence_results = ModelOutput("Persistence", y_actual, y_persistence,
+                                         self.targets, self.data.standardization_info)
         return persistence_results
-
-    def plot_global_RMSE(self, persistence_RMSE):
-        targets = [f"{d['Target']}\n({d.get('Variable units', 'no units')})" for d in self.RMSE]
-        model_rmse = [d['Global'] for d in self.RMSE]
-        pers_rmse = [d['Global'] for d in persistence_RMSE]
-
-        x = np.arange(len(targets))
-        width = 0.35
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        rects1 = ax.bar(x - width/2, model_rmse, width, label='CNN Model', color='#1f77b4')
-        rects2 = ax.bar(x + width/2, pers_rmse, width, label='Persistence', color='#7f7f7f', alpha=0.7)
-
-        ax.set_ylabel('Global RMSE')
-        ax.set_xlabel('Target Variable')
-        ax.set_title('Global RMSE Comparison: Model vs. Persistence')
-        ax.set_xticks(x)
-        ax.set_xticklabels(targets)
-        ax.legend()
-
-        ax.yaxis.grid(True, linestyle='--', alpha=0.6)
-        fig.tight_layout()
-        plt.show()
-
-
-    def plot_RMSE_per_grid_point(self, lon, lat, persistence_RMSE):
-        for i, target_rmse in enumerate(self.RMSE):
-            target = target_rmse['Target']
-            y_test_map = self.y_test[:, i, :, :]
-            y_pred_map = self.y_pred[:, i, :, :]
-            rmse_map = target_rmse['Per grid point']
-
-            fig, axes = plt.subplots(1, 2, figsize=(18, 6), subplot_kw={'projection': ccrs.PlateCarree()})
-
-            data = y_test_map.mean(axis=0)
-            vmin = np.min(data)
-            vmax = np.max(data)
-            title = f"True Values - {target}"
-            colorbar_label = target_rmse['Variable units']
-            plot_subplot(axes[0], lon, lat, data, title, colorbar_label, vmin, vmax)
-
-            data = y_pred_map.mean(axis=0)
-            title = f"Predictions - {target}"
-            plot_subplot(axes[1], lon, lat, data, title, colorbar_label, vmin, vmax)
-
-            plt.tight_layout()
-            plt.show()
-
-            fig, axes = plt.subplots(1, 2, figsize=(18, 6), subplot_kw={'projection': ccrs.PlateCarree()})
-
-            target_persistence = persistence_RMSE[i]
-            data = target_persistence['Per grid point']
-            vmin = np.min(data)
-            vmax = np.max(data)
-            title = f"RMSE per grid point - {target}"
-            colorbar_label = f"RMSE ({target_rmse['Variable units']})"
-            plot_subplot(axes[0], lon, lat, data, title, colorbar_label, vmin, vmax)
-
-            data = rmse_map
-            title = f"RMSE per grid point - {target}"
-            plot_subplot(axes[1], lon, lat, data, title, colorbar_label, vmin, vmax)
-
-
-            plt.tight_layout()
-            plt.show()
-
-    def plot_RMSE_per_time(self, time, nlags=3):
-        for i, target_rmse in enumerate(self.RMSE):
-            target = target_rmse['Target']
-            rmse_time = target_rmse['Over time']
-            actual_series = self.y_test[:, i, :, :].mean(axis=(1, 2))
-            pred_series = self.y_pred[:, i, :, :].mean(axis=(1, 2))
-            time_converted = time[nlags:].to_index().to_datetimeindex()
-
-            fig, (ax2, ax1) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-
-            ax1.plot(time_converted, rmse_time, color='tab:red', linewidth=1.5)
-            ax1.set_ylabel(f"RMSE ({target_rmse['Variable units']})")
-            ax1.set_title(f'Global RMSE over Time - {target}')
-            ax1.grid(True, alpha=0.3)
-
-            ax2.plot(time_converted, actual_series, label='Actual (Global Mean)',
-                 color='black', linestyle='--', alpha=0.7)
-            ax2.plot(time_converted, pred_series, label='Predicted (Global Mean)',
-                 color='tab:blue', linewidth=1.5)
-            ax2.set_title(f'Global {target} over Time')
-            ax2.set_ylabel(f"{target} ({target_rmse['Variable units']})")
-            ax2.set_xlabel('Time')
-            ax2.legend(loc='upper right')
-            ax2.grid(True, alpha=0.3)
-
-            plt.tight_layout()
-            plt.show()
-
 
     def save_checkpoint(self, train_losses, val_losses):
         self.train_losses = train_losses
@@ -405,7 +294,7 @@ class CNN2D(nn.Module):
             'train_losses': train_losses,
             'val_losses': val_losses,
         }
-        torch.save(checkpoint, self.label)
+        torch.save(checkpoint, self.out_path)
         self.logger.info(f"Checkpoint saved at epoch {self.num_epochs}.")
 
     def create_data_tensors(self):
@@ -452,3 +341,160 @@ def plot_subplot(ax, lon, lat, data, title, colorbar_label, vmin, vmax, cmap='vi
     ax.set_ylabel('Latitude')
     cbar = plt.colorbar(im, ax=ax, orientation='horizontal', pad=0.1, shrink=0.8)
     cbar.set_label(colorbar_label)
+
+class ModelOutput:
+    def __init__(self, label, Y_test, Y_pred, targets, var_info,
+                 debug=True):
+        self.logger = logging.getLogger(f"{label}-output")
+        if debug:
+           self.logger.setLevel(logging.DEBUG)
+
+        self.label = label
+        self.Y_test = Y_test
+        self.Y_pred = Y_pred
+        self.targets = targets
+        self.var_info = var_info
+        self.RMSE = []
+
+        self.calculate_RMSE()
+
+    def calculate_RMSE(self):
+        err = self.Y_pred - self.Y_test
+
+        for i, target in enumerate(self.targets):
+            self.logger.debug(f"Calculating RMSE for target: {target}")
+            target_err = err[:, i, :, :]
+            global_RMSE = np.sqrt(np.mean(target_err**2))
+            spatial_RMSE = np.sqrt(np.mean(target_err ** 2, axis=0))
+            temporal_RMSE =  np.sqrt(np.mean(target_err ** 2, axis=(1,2)))
+            units = self.get_var_units(target)
+
+            self.RMSE.append(
+                {'target': target,
+                 'global_RMSE': global_RMSE,
+                 'spatial_RMSE': spatial_RMSE,
+                 'temporal_RMSE': temporal_RMSE,
+                 'units': units}
+                )
+            self.logger.debug(f"Global RMSE: {target} :: {global_RMSE}")
+
+    def get_var_units(self, target):
+        for info in self.var_info:
+            if target == info['var_name']:
+                return info['original_units']
+
+        raise RuntimeError(f"Unable to find orginial units for {target}")
+    
+class Results:
+    def __init__(self):
+        self.output = None
+
+    def add_model_output(self, Model, run_type="ground_truth"):
+        if run_type == "ground_truth":
+            self.predict_with_groud_truth(Model)
+        elif run_type == "forecast_rollout":
+            self.forecast_rollout(Model)
+        else:
+            raise RuntimeError("The run type is not valid!")
+
+    def forecast_rollout(self, Model):
+        if self.output is None:
+            self.output = []
+        self.output.append(Model.forecast_rollout())
+
+    def predict_with_groud_truth(self, Model):
+        if self.output is None:
+            self.output = []
+            self.output.append(Model.get_persistence_baseline())
+        self.output.append(Model.predict_with_ground_truth())
+
+    def plot_global_RMSE(self, target):
+        rmse_values = []
+        model_labels = []
+        units = 'None'
+
+        for Model in self.output:
+            found = False
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    rmse_values.append(variable['global_RMSE'])
+                    model_labels.append(Model.label)
+                    units = variable['units']
+                    found = True
+                    break
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
+
+        plt.figure(figsize=(12, 6))
+        x = np.arange(len(model_labels))
+        bars = plt.bar(x, rmse_values, color='tab:blue', alpha=0.75, edgecolor='black', linewidth=0.5)
+        plt.bar_label(bars, padding=3, fmt='%.3f', fontweight='bold')
+    
+        plt.xticks(x, model_labels, rotation=30)
+        plt.ylabel(f"RMSE ({units})")
+        plt.title(f"Global RMSE Comparison by Model and {target}")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_temporal_RMSE(self, target, time_test, nlags=3):
+        time_converted = time_test.to_index().to_datetimeindex()
+
+        l = None
+
+        num_models = len(self.output)
+        fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        for idx, Model in enumerate(self.output):
+            ax = axes[idx]
+            i = nlags
+            if Model.label == "Persistence":
+                i = nlags + 1
+    
+            found = False
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    found = True
+                    units = variable['units']
+                    if l is None:
+                        l = min(variable['temporal_RMSE'])
+                        u = max(variable['temporal_RMSE'])
+
+                    ax.set_title(f"{Model.label}")
+                    ax.set_ylim(l, u)
+                    ax.grid(True, alpha=0.3)
+                    ax.plot(time_converted[i:], variable['temporal_RMSE'], linestyle='dashed', marker='o')
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
+
+        plt.ylabel(f"RMSE ({units})")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        plt.title(f"Global RMSE Comparison by Model and {target}")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_spatial_RMSE(self, target, lon, lat):
+        num_models = len(self.output)
+        l = None
+        fig, axes = plt.subplots(num_models, 1, figsize=(8, 5 * num_models), subplot_kw={'projection': ccrs.PlateCarree()})
+        for idx, Model in enumerate(self.output):
+            found = False
+
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    found = True
+                    units = variable['units']
+                    if l is None:
+                        l = min(variable['temporal_RMSE'])
+                        u = max(variable['temporal_RMSE'])
+
+                    data = variable['spatial_RMSE']
+                    title = f"Spatial RMSE - {Model.label}"
+                    colorbar_label = f"RMSE ({units})"
+                    plot_subplot(axes[idx], lon, lat, data, title, colorbar_label, l, u)
+
+
+        plt.tight_layout()
+        plt.show()
+
+
+
