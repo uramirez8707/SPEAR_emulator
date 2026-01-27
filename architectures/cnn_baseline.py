@@ -658,6 +658,18 @@ class Results:
                     ax.set_ylim(l, u)
                     ax.grid(True, alpha=0.3)
                     ax.set_ylabel(f"RMSE ({units})")
+                    x_num = np.array([d.toordinal() for d in time_converted[i:]])
+                    slope, intercept = np.polyfit(x_num, variable['temporal_RMSE'], 1)
+                    slope_text = f"Slope = {slope:.3e}"
+
+                    ax.text(0.95, 0.95,
+                            slope_text,
+                            horizontalalignment='right',
+                            verticalalignment='top',
+                            transform=ax.transAxes,
+                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='gray', boxstyle='round,pad=0.5')
+                    )
+
                     ax.plot(time_converted[i:], variable['temporal_RMSE'], linestyle='dashed', marker='o')
             if not found:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
