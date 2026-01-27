@@ -64,6 +64,92 @@ class CNN2D(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+    def train_multi_step_loss(self, load_model=False, horizon=3):
+        if not load_model:
+            path = Path(self.out_path)
+            if path.exists():
+                self.checkpoint = torch.load(self.out_path, weights_only=False)
+                self.model.load_state_dict(self.checkpoint['model_state_dict'])
+                self.optimizer.load_state_dict(self.checkpoint['optimizer_state_dict'])
+                self.val_losses = self.checkpoint['val_losses']
+                self.train_losses = self.checkpoint['train_losses']
+                return
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+        criterion = nn.MSELoss()
+        train_loader, validate_loader = self.create_data_tensors()
+
+        epoch_train_losses = {target: [] for target in self.targets}
+        epoch_val_losses = {target: [] for target in self.targets}
+
+        for epoch in range(self.num_epochs):
+            # Training Phase
+            self.model.train()
+            batch_train_losses = {target: 0.0 for target in self.targets}
+            total_train_samples = 0
+
+            for x_batch, Y_batch in train_loader:
+                x_batch = x_batch.to(device)
+                Y_batch = Y_batch.to(device)
+
+                self.optimizer.zero_grad()
+                preds = self.model(x_batch)
+
+                total_loss = 0.0
+                current_batch_losses = []
+
+                for i, target in enumerate(self.targets):
+                    target_loss = criterion(preds[:, i], Y_batch[:, i])
+                    current_batch_losses.append(target_loss.item())
+                    total_loss += target_loss
+
+                total_loss.backward()
+                self.optimizer.step()
+
+                # Accumulate loss and number of samples for each target
+                for i, target in enumerate(self.targets):
+                    batch_train_losses[target] += current_batch_losses[i] * x_batch.size(0)
+                total_train_samples += x_batch.size(0)
+
+            # Calculate average training loss for each target
+            for target in self.targets:
+                avg_train_loss = batch_train_losses[target] / total_train_samples
+                epoch_train_losses[target].append(avg_train_loss)
+
+            # Validation Phase
+            self.model.eval()
+            batch_val_losses = {target: 0.0 for target in self.targets}
+            total_val_samples = 0
+
+            with torch.no_grad():
+                for x_val, y_val in validate_loader:
+                    x_val = x_val.to(device)
+                    y_val = y_val.to(device)
+
+                    val_preds = self.model(x_val)
+
+                    for i, target in enumerate(self.targets):
+                        specific_val_loss = criterion(val_preds[:, i], y_val[:, i])
+                        batch_val_losses[target] += specific_val_loss.item() * x_val.size(0)
+
+                    total_val_samples += x_val.size(0)
+
+            # Calculate average validation loss for each target
+            for target in self.targets:
+                avg_val_loss = batch_val_losses[target] / total_val_samples
+                epoch_val_losses[target].append(avg_val_loss)
+
+            # Logging every 10 epochs
+            if (epoch + 1) % 10 == 0:
+                for target in self.targets:
+                    self.logger.info(f"Epoch {epoch + 1}/{self.num_epochs}, "
+                                     f"Train Loss ({target}): {epoch_train_losses[target][-1]:.4f}, "
+                                     f"Validation Loss ({target}): {epoch_val_losses[target][-1]:.4f}")
+
+        self.save_checkpoint(epoch_train_losses, epoch_val_losses)
+        self.logger.info("Training completed.")
+
     def train(self):
         # Check if a model already exists, load it and move on to testing:
         path = Path(self.out_path)
@@ -182,7 +268,7 @@ class CNN2D(nn.Module):
         plt.tight_layout()
         plt.show()
 
-    def predict_with_ground_truth(self):
+    def predict_with_ground_truth(self, lon, lat):
         self.model.eval()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
@@ -196,11 +282,12 @@ class CNN2D(nn.Module):
         y_test = self.inverse_transform(self.data.Y_test)
         label = self.label
         output = ModelOutput(label, y_test, y_pred,
-                            self.targets, self.data.standardization_info)
+                            self.targets, self.data.standardization_info,
+                            lon, lat)
     
         return output
     
-    def forecast_rollout(self):
+    def forecast_rollout(self, lon, lat):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.eval()
         self.model.to(device)
@@ -242,7 +329,8 @@ class CNN2D(nn.Module):
         y_test = self.inverse_transform(self.data.Y_test)
         label = f"{self.label}"
         output = ModelOutput(label, y_test, y_prediction,
-                            self.targets, self.data.standardization_info)
+                            self.targets, self.data.standardization_info,
+                            lon, lat)
     
         return output
 
@@ -273,7 +361,7 @@ class CNN2D(nn.Module):
             mappings.append(indices)
         return mappings
 
-    def get_persistence_baseline(self):
+    def get_persistence_baseline(self, lon, lat):
         y_actual = self.data.Y_test[1:, :, :, :]
         y_persistence = self.data.Y_test[:-1, :, :, :]
 
@@ -282,7 +370,8 @@ class CNN2D(nn.Module):
         y_persistence = self.inverse_transform(y_persistence)
 
         persistence_results = ModelOutput("Persistence", y_actual, y_persistence,
-                                         self.targets, self.data.standardization_info)
+                                         self.targets, self.data.standardization_info,
+                                         lon, lat)
         return persistence_results
 
     def save_checkpoint(self, train_losses, val_losses):
@@ -344,7 +433,7 @@ def plot_subplot(ax, lon, lat, data, title, colorbar_label, vmin, vmax, cmap='vi
 
 class ModelOutput:
     def __init__(self, label, Y_test, Y_pred, targets, var_info,
-                 debug=True):
+                 lon, lat, debug=True):
         self.logger = logging.getLogger(f"{label}-output")
         if debug:
            self.logger.setLevel(logging.DEBUG)
@@ -356,17 +445,35 @@ class ModelOutput:
         self.var_info = var_info
         self.RMSE = []
 
-        self.calculate_RMSE()
+        self.calculate_RMSE(lon, lat)
 
-    def calculate_RMSE(self):
+    def calculate_RMSE(self, lon, lat):
         err = self.Y_pred - self.Y_test
+
+        # Calculating latitude weights
+        area_weights = np.cos(np.deg2rad(lat.to_numpy()))[:, None]
+        area_weights = np.broadcast_to(area_weights, (lat.size, lon.size))
+        area_weights = area_weights / np.sum(area_weights)
+
+        self.logger.debug(f"Size of the area weight:: {area_weights.shape}")
 
         for i, target in enumerate(self.targets):
             self.logger.debug(f"Calculating RMSE for target: {target}")
+
             target_err = err[:, i, :, :]
-            global_RMSE = np.sqrt(np.mean(target_err**2))
-            spatial_RMSE = np.sqrt(np.mean(target_err ** 2, axis=0))
-            temporal_RMSE =  np.sqrt(np.mean(target_err ** 2, axis=(1,2)))
+            sq_err = target_err ** 2
+
+            # --- Global RMSE (area + time weighted) ---
+            global_mse = np.sum(sq_err * area_weights[None, :, :]) / sq_err.shape[0]
+            global_RMSE = np.sqrt(global_mse)
+
+            # --- Spatial RMSE (per grid cell, weighted over time only) ---
+            spatial_RMSE = np.sqrt(np.mean(sq_err, axis=0))  # (lat, lon)
+
+            # --- Temporal RMSE (per timestep, area-weighted) ---
+            temporal_mse = np.sum(sq_err * area_weights[None, :, :], axis=(1, 2))
+            temporal_RMSE = np.sqrt(temporal_mse)
+
             units = self.get_var_units(target)
 
             self.RMSE.append(
@@ -386,8 +493,10 @@ class ModelOutput:
         raise RuntimeError(f"Unable to find orginial units for {target}")
     
 class Results:
-    def __init__(self):
+    def __init__(self, longitude, latitude):
         self.output = None
+        self.lat = latitude
+        self.lon = longitude
 
     def add_model_output(self, Model, run_type="ground_truth"):
         if run_type == "ground_truth":
@@ -400,13 +509,13 @@ class Results:
     def forecast_rollout(self, Model):
         if self.output is None:
             self.output = []
-        self.output.append(Model.forecast_rollout())
+        self.output.append(Model.forecast_rollout(self.lon, self.lat))
 
     def predict_with_groud_truth(self, Model):
         if self.output is None:
             self.output = []
-            self.output.append(Model.get_persistence_baseline())
-        self.output.append(Model.predict_with_ground_truth())
+            self.output.append(Model.get_persistence_baseline(self.lon, self.lat))
+        self.output.append(Model.predict_with_ground_truth(self.lon, self.lat))
 
     def plot_global_RMSE(self, target):
         rmse_values = []
