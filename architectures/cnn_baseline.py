@@ -481,9 +481,45 @@ class ModelOutput:
                  'global_RMSE': global_RMSE,
                  'spatial_RMSE': spatial_RMSE,
                  'temporal_RMSE': temporal_RMSE,
+                 'regional_RMSE': self.calculate_regional_rmse(sq_err, lat, lon),
                  'units': units}
                 )
             self.logger.debug(f"Global RMSE: {target} :: {global_RMSE}")
+
+    def calculate_regional_rmse(self, sq_err, lattitude, longitude):
+        regions = {
+            "Tropics":  {"lat": (-30, 30)},
+            "NH":       {"lat": (0, 90)},
+            "SH":       {"lat": (-90, 0)},
+            "NH_mid":   {"lat": (30, 60)},
+        }
+
+        lat = lattitude.to_numpy()
+        lon = longitude.to_numpy()
+
+        area_weights = np.cos(np.deg2rad(lat))[:, None]
+        area_weights = np.broadcast_to(area_weights, (lat.size, lon.size))
+
+        regional_rmse = {}
+
+        for region_name, bounds in regions.items():
+            mask = np.ones((lat.size, lon.size), dtype=bool)
+
+            if "lat" in bounds:
+                lat_min, lat_max = bounds["lat"]
+                mask &= (lat[:, None] >= lat_min) & (lat[:, None] <= lat_max)
+
+            if "lon" in bounds:
+                lon_min, lon_max = bounds["lon"]
+                mask &= (lon[None, :] >= lon_min) & (lon[None, :] <= lon_max)
+
+            w_reg = area_weights * mask
+            w_reg = w_reg / np.sum(w_reg)
+
+            mse = np.mean(np.sum(sq_err * w_reg[None, :, :], axis=(1, 2)))
+            regional_rmse[region_name] = np.sqrt(mse)
+
+        return regional_rmse
 
     def get_var_units(self, target):
         for info in self.var_info:
@@ -516,6 +552,53 @@ class Results:
             self.output = []
             self.output.append(Model.get_persistence_baseline(self.lon, self.lat))
         self.output.append(Model.predict_with_ground_truth(self.lon, self.lat))
+
+    def plot_regional_RMSE(self, target):
+        regional_RMSE = []
+        model_labels = []
+        for Model in self.output:
+            found = False
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    model_labels.append(Model.label)
+                    found = True
+                    regional_RMSE.append(variable['regional_RMSE'])
+                    break
+
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
+
+        regions = list(regional_RMSE[0].keys())
+        n_models = len(model_labels)
+        n_regions = len(regions)
+
+        values = np.array([
+            [rmse[r] for r in regions]
+            for rmse in regional_RMSE
+        ])  # shape (models, regions)
+
+        x = np.arange(n_regions)
+        width = 0.8 / n_models
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        for i, label in enumerate(model_labels):
+            ax.bar(
+                x + i * width,
+                values[i],
+                width,
+              label=label
+            )
+
+        ax.set_xticks(x + width * (n_models - 1) / 2)
+        ax.set_xticklabels(regions)
+        ax.set_ylabel("RMSE")
+        ax.set_title(f"Regional RMSE — {target}")
+        ax.legend()
+
+        ax.grid(axis="y", alpha=0.3)
+        plt.tight_layout()
+        plt.show()
 
     def plot_global_RMSE(self, target):
         rmse_values = []
