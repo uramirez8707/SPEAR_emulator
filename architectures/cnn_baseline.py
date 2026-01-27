@@ -8,6 +8,8 @@ from architectures.Models import get_model_archirecture
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from sklearn.metrics import r2_score
+
 import logging
 import cftime
 
@@ -268,7 +270,7 @@ class CNN2D(nn.Module):
         plt.tight_layout()
         plt.show()
 
-    def predict_with_ground_truth(self, lon, lat):
+    def predict_with_ground_truth(self, lon, lat, add_y_actual):
         self.model.eval()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
@@ -283,11 +285,11 @@ class CNN2D(nn.Module):
         label = self.label
         output = ModelOutput(label, y_test, y_pred,
                             self.targets, self.data.standardization_info,
-                            lon, lat)
+                            lon, lat, add_y_actual)
     
         return output
     
-    def forecast_rollout(self, lon, lat):
+    def forecast_rollout(self, lon, lat, add_y_actual):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.eval()
         self.model.to(device)
@@ -330,7 +332,7 @@ class CNN2D(nn.Module):
         label = f"{self.label}"
         output = ModelOutput(label, y_test, y_prediction,
                             self.targets, self.data.standardization_info,
-                            lon, lat)
+                            lon, lat, add_y_actual)
     
         return output
 
@@ -433,7 +435,7 @@ def plot_subplot(ax, lon, lat, data, title, colorbar_label, vmin, vmax, cmap='vi
 
 class ModelOutput:
     def __init__(self, label, Y_test, Y_pred, targets, var_info,
-                 lon, lat, debug=True):
+                 lon, lat, add_y_actual=False, debug=True):
         self.logger = logging.getLogger(f"{label}-output")
         if debug:
            self.logger.setLevel(logging.DEBUG)
@@ -445,9 +447,9 @@ class ModelOutput:
         self.var_info = var_info
         self.RMSE = []
 
-        self.calculate_RMSE(lon, lat)
+        self.calculate_RMSE(lon, lat, add_y_actual)
 
-    def calculate_RMSE(self, lon, lat):
+    def calculate_RMSE(self, lon, lat, add_y_actual=False):
         err = self.Y_pred - self.Y_test
 
         # Calculating latitude weights
@@ -478,15 +480,19 @@ class ModelOutput:
 
             units = self.get_var_units(target)
 
-            self.RMSE.append(
-                {'target': target,
+            out = {'target': target,
                  'global_RMSE': global_RMSE,
                  'spatial_RMSE': spatial_RMSE,
                  'temporal_RMSE': temporal_RMSE,
                  'zonal_mean_bias': zonal_mean_bias,
+                 'prediction': self.Y_pred[:, i, :, :],
                  'regional_RMSE': self.calculate_regional_rmse(sq_err, lat, lon),
                  'units': units}
-                )
+
+            if add_y_actual:
+                out['y_actual'] = self.Y_test[:, i, :, :]
+
+            self.RMSE.append(out)
             self.logger.debug(f"Global RMSE: {target} :: {global_RMSE}")
 
     def calculate_regional_rmse(self, sq_err, lattitude, longitude):
@@ -546,15 +552,19 @@ class Results:
             raise RuntimeError("The run type is not valid!")
 
     def forecast_rollout(self, Model):
+        add_y_actual = False
         if self.output is None:
             self.output = []
-        self.output.append(Model.forecast_rollout(self.lon, self.lat))
+            add_y_actual = True
+        self.output.append(Model.forecast_rollout(self.lon, self.lat, add_y_actual))
 
     def predict_with_groud_truth(self, Model):
+        add_y_actual = False
         if self.output is None:
             self.output = []
+            add_y_actual = True
             self.output.append(Model.get_persistence_baseline(self.lon, self.lat))
-        self.output.append(Model.predict_with_ground_truth(self.lon, self.lat))
+        self.output.append(Model.predict_with_ground_truth(self.lon, self.lat, add_y_actual))
 
     def plot_regional_RMSE(self, target):
         regional_RMSE = []
@@ -728,6 +738,53 @@ class Results:
                     ax.grid(True, alpha=0.3)
                     ax.set_ylabel(f"Zonal Mean Bias ({units})")
                     ax.plot(lat, variable['zonal_mean_bias'] , linestyle='dashed', marker='o')
+
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_scatter_y_pred_vs_y_actual(self, target, n=1000, random_seed=42):
+        num_models = len(self.output)
+        y_actual = None
+        np.random.seed(random_seed)
+
+        fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        for idx, Model in enumerate(self.output):
+            ax = axes[idx]
+            found = False
+
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    found = True
+                    units = variable['units']
+                    y_pred = variable['prediction']
+                    if y_actual is None:
+                        y_actual = variable.get('y_actual')
+
+                    if y_actual is None:
+                        raise RuntimeError(f"Error getting the y_actual")
+
+                    y_actual_flat = y_actual.flatten()
+                    y_pred_flat = y_pred.flatten()
+                    n_points = min(n, y_actual_flat.size)
+                    indices = np.random.choice(y_actual_flat.size, size=n_points, replace=False)
+
+                    ax.set_title(f"{target}: y_pred vs y_actual for {Model.label} Model")
+                    y_actual_sample = y_actual_flat[indices]
+                    y_pred_sample = y_pred_flat[indices]
+                    r2 = r2_score(y_actual_sample, y_pred_sample)
+
+                    ax.scatter(y_actual_sample, y_pred_sample)
+                    ax.plot([y_actual_sample.min(), y_actual_sample.max()], [y_actual_sample.min(), y_actual_sample.max()], 'r--', label='1:1 line')
+                    ax.set_ylim(min(y_actual_flat), max(y_actual_flat))
+                    ax.grid(True, alpha=0.3)
+
+                    ax.set_xlabel(f'Actual {target} ({units})')
+                    ax.set_ylabel(f'Predicted {target} ({units})')
+                    ax.text(0.05, 0.95, f"$R^2$ = {r2:.2f}", transform=ax.transAxes,
+                        fontsize=10, verticalalignment='top', bbox=dict(boxstyle="round", facecolor='white', alpha=0.7))
 
             if not found:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
