@@ -645,9 +645,16 @@ class Results:
     def plot_temporal_RMSE(self, target, time_test, nlags=3):
         time_converted = time_test.to_index().to_datetimeindex()
 
-        l = None
+        l = 0
+        u = 0
 
         num_models = len(self.output)
+        for Model in self.output:
+            for variable in Model.RMSE:
+                 if variable['target'] == target:
+                     if max(variable['temporal_RMSE']) > u:
+                         u = max(variable['temporal_RMSE'])
+
         fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
         for idx, Model in enumerate(self.output):
             ax = axes[idx]
@@ -660,9 +667,6 @@ class Results:
                 if variable['target'] == target:
                     found = True
                     units = variable['units']
-                    if l is None:
-                        l = min(variable['temporal_RMSE'])
-                        u = max(variable['temporal_RMSE'])
 
                     ax.set_title(f"{target}: Global RMSE for {Model.label} Model")
                     ax.set_ylim(l, u)
