@@ -474,6 +474,8 @@ class ModelOutput:
             temporal_mse = np.sum(sq_err * area_weights[None, :, :], axis=(1, 2))
             temporal_RMSE = np.sqrt(temporal_mse)
 
+            zonal_mean_bias = target_err.mean(axis=(0, 2))
+
             units = self.get_var_units(target)
 
             self.RMSE.append(
@@ -481,6 +483,7 @@ class ModelOutput:
                  'global_RMSE': global_RMSE,
                  'spatial_RMSE': spatial_RMSE,
                  'temporal_RMSE': temporal_RMSE,
+                 'zonal_mean_bias': zonal_mean_bias,
                  'regional_RMSE': self.calculate_regional_rmse(sq_err, lat, lon),
                  'units': units}
                 )
@@ -583,12 +586,13 @@ class Results:
         fig, ax = plt.subplots(figsize=(10, 5))
 
         for i, label in enumerate(model_labels):
-            ax.bar(
+            bars = ax.bar(
                 x + i * width,
                 values[i],
                 width,
               label=label
             )
+            ax.bar_label(bars, padding=3, fmt='%.3f', fontweight='bold')
 
         ax.set_xticks(x + width * (n_models - 1) / 2)
         ax.set_xticklabels(regions)
@@ -681,9 +685,40 @@ class Results:
                     colorbar_label = f"RMSE ({units})"
                     plot_subplot(axes[idx], lon, lat, data, title, colorbar_label, l, u)
 
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 
         plt.tight_layout()
         plt.show()
 
+    def plot_zonal_bias(self, target, lat):
+        num_models = len(self.output)
+        l = 0
+        for Model in self.output:
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    if max(abs(variable['zonal_mean_bias'])) > l:
+                        l = max(abs(variable['zonal_mean_bias']))
 
+        fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        for idx, Model in enumerate(self.output):
+            ax = axes[idx]
 
+            found = False
+            for variable in Model.RMSE:
+                if variable['target'] == target:
+                    found = True
+                    units = variable['units']
+
+                    ax.set_title(f"{target}: Zonal Mean Bias for {Model.label} Model")
+                    ax.set_ylim(-l, l)
+                    ax.axhline(0, color='gray', linestyle='--', linewidth=1)
+                    ax.grid(True, alpha=0.3)
+                    ax.set_ylabel(f"Zonal Mean Bias ({units})")
+                    ax.plot(lat, variable['zonal_mean_bias'] , linestyle='dashed', marker='o')
+
+            if not found:
+                raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
+
+        plt.tight_layout()
+        plt.show()
