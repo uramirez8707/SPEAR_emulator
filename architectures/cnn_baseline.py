@@ -4,11 +4,12 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 from pathlib import Path
-from architectures.Models import get_model_archirecture
+from architectures.Models import get_model_archirecture, construct_model, define_optimizer
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from sklearn.metrics import r2_score
+import itertools
 
 import logging
 import cftime
@@ -31,9 +32,10 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True  # force deterministic algorithms
     torch.backends.cudnn.benchmark = False     # disable auto-tuner for convolution
 
-
 class CNN2D(nn.Module):
-    def __init__(self, data, num_epochs=50, batch_size=32, lr=1e-3, case=0, label="baseline", debug=True):
+    def __init__(self, data, num_epochs=50, batch_size=32, lr=1e-3, case=0,
+                 filters=(16, 32, 32), weight_decay=0, optimizer="Adam",
+                 label="baseline", debug=True):
         super(CNN2D, self).__init__()
 
         self.logger = logging.getLogger(label)
@@ -43,7 +45,11 @@ class CNN2D(nn.Module):
         self.in_channels = data.x_train.shape[1]
         self.out_channels = data.Y_train.shape[1]
 
-        self.model = get_model_archirecture(case, self.in_channels, self.out_channels)
+        if case > 3:
+            self.model = construct_model(self.in_channels, self.out_channels, filters)            
+        else:
+            self.model = get_model_archirecture(case, self.in_channels, self.out_channels)
+
         self.label = label
         self.out_path = f".results/{label}.pt"
         self.data = data
@@ -52,7 +58,8 @@ class CNN2D(nn.Module):
         self.lr = lr
         self.checkpoint = None
         self.targets = self.data.y_description
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+
+        self.optimizer = define_optimizer(self.model, optimizer, lr, weight_decay)
 
         self.logger.debug(self.model)
         self.logger.debug(f"Input channels: {self.in_channels}")
@@ -151,6 +158,9 @@ class CNN2D(nn.Module):
 
         self.save_checkpoint(epoch_train_losses, epoch_val_losses)
         self.logger.info("Training completed.")
+
+    def get_val_loss(self, target):
+        return self.val_losses[target][-1]
 
     def train(self):
         # Check if a model already exists, load it and move on to testing:
@@ -435,7 +445,7 @@ def plot_subplot(ax, lon, lat, data, title, colorbar_label, vmin, vmax, cmap='vi
 
 class ModelOutput:
     def __init__(self, label, Y_test, Y_pred, targets, var_info,
-                 lon, lat, add_y_actual=False, debug=True):
+                 lon, lat, add_y_actual=True, debug=True):
         self.logger = logging.getLogger(f"{label}-output")
         if debug:
            self.logger.setLevel(logging.DEBUG)
@@ -795,3 +805,47 @@ class Results:
 
         plt.tight_layout()
         plt.show()
+
+
+def run_configuration_ens(configurations, data, nepochs=20, nruns=20,
+                          label=""):
+    keys = configurations.keys()
+    values = configurations.values()
+    all_configs = [
+        dict(zip(keys, v))
+        for v in itertools.product(*values)
+    ]
+
+    print(f"Total number of configurations to test {len(all_configs)}")
+
+    sample_configurations = random.sample(all_configs, nruns)
+    print(f"Selecting {len(sample_configurations)} configurations to test")
+
+    results = []
+    for run_id, config in enumerate(sample_configurations):
+        output = {}
+        print(f"run id: {run_id}: {config}")
+
+        learning_rate = config.get("learning_rate")
+        batch_size = config.get("batch_size")
+        filters = config.get("filters")
+        optimizer = config.get("optimizers")
+        weight_decay = config.get("weight_decay")
+
+        Model = CNN2D(data,
+                  num_epochs=nepochs,
+                  batch_size=batch_size,
+                  lr = learning_rate,
+                  filters = filters,
+                  weight_decay = weight_decay,
+                  optimizer=optimizer,
+                  case = 4,
+                  label = f"run_{label}{run_id:02d}",
+                  debug = False)
+        Model.train()
+
+        output['run_id'] = f"run_{run_id:02d}"
+        output['validation_loss'] = Model.get_val_loss("t_ref")
+        output.update(config)
+        results.append(output)
+    return results
