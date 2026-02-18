@@ -624,7 +624,7 @@ class Results:
         plt.tight_layout()
         plt.show()
 
-    def plot_global_RMSE(self, target):
+    def plot_global_RMSE(self, target, output_statics=False):
         rmse_values = []
         model_labels = []
         units = 'None'
@@ -650,6 +650,17 @@ class Results:
         plt.ylabel(f"RMSE ({units})")
         plt.title(f"Global RMSE Comparison by Model and {target}")
         plt.tight_layout()
+
+        if output_statics:
+            mean = np.mean(rmse_values)
+            std = np.std(rmse_values)
+            plt.text(
+                0.95, 0.95,  # position in axes fraction (top-right corner)
+                f"Mean: {mean:.3f}\nStd: {std:.3f}",
+                horizontalalignment='right',
+                verticalalignment='top',
+                transform=plt.gca().transAxes,
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.show()
 
     def plot_temporal_RMSE(self, target, time_test, nlags=3):
