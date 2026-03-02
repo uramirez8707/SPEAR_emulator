@@ -507,6 +507,7 @@ class ModelOutput:
 
     def calculate_regional_rmse(self, sq_err, lattitude, longitude):
         regions = {
+            "Global":   {"lat": (-90, 90)},
             "Tropics":  {"lat": (-30, 30)},
             "NH":       {"lat": (0, 90)},
             "SH":       {"lat": (-90, 0)},
@@ -666,15 +667,22 @@ class Results:
     def plot_temporal_RMSE(self, target, time_test, nlags=3):
         time_converted = time_test.to_index().to_datetimeindex()
 
-        l = 0
-        u = 0
+        l = float('inf')
+        u = float('-inf')
 
         num_models = len(self.output)
+        # First pass: find min and max across all models for consistent axis
         for Model in self.output:
             for variable in Model.RMSE:
                  if variable['target'] == target:
-                     if max(variable['temporal_RMSE']) > u:
-                         u = max(variable['temporal_RMSE'])
+                     prediction = variable['prediction'].mean(axis=(1, 2))
+                     rmse = variable['temporal_RMSE']
+                     
+                     upper_bound = np.max(prediction + rmse)
+                     lower_bound = np.min(prediction - rmse)
+                     
+                     u = max(u, upper_bound)
+                     l = min(l, lower_bound)
 
         fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
         for idx, Model in enumerate(self.output):
@@ -705,7 +713,13 @@ class Results:
                             bbox=dict(facecolor='white', alpha=0.7, edgecolor='gray', boxstyle='round,pad=0.5')
                     )
 
-                    ax.plot(time_converted[i:], variable['temporal_RMSE'], linestyle='dashed', marker='o')
+                    prediction = variable['prediction'].mean(axis=(1, 2))
+                    rmse = variable['temporal_RMSE']
+
+                    ax.plot(time_converted[i:], prediction,
+                            color='black', label='Avg t_ref', linewidth=1.5)
+                    ax.fill_between(time_converted[i:], prediction - rmse,
+                                    prediction + rmse, color='blue', alpha=0.2, label='± RMSE')
             if not found:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 

@@ -34,8 +34,8 @@ class VarSet:
         self.procress_variable()
 
     def get_data_set(self, var_name):
-        valid_names = ["training", "validating", "testing", "spatial_features", "wet"]
-        if var_name not in valid_names:
+        valid_names = ["training", "validating", "testing"]
+        if var_name not in valid_names and not self.is_static:
            raise RuntimeError(f"get_data_set:: {var_name} is not valid. It must be {valid_names}")
         self.logger.debug(f"Getting the {var_name} data")
         out_data = self.file[var_name]
@@ -89,6 +89,8 @@ class VarSet:
 
         if self.var_name == "spatial_features":
             self.x_description = self.file.coords["channel"].values.tolist()
+        else:
+            self.x_description = [f"{self.var_name}"]
 
     def procress_dynamic_variable(self):
         training = self.get_data_set("training")
@@ -146,12 +148,18 @@ class DataSet:
 
             self.x_description.extend(variable.x_description)
             self.standardization_info.append(variable.standardization_info)
-            self.log_shape()
+            if debug: self.log_shape()
             self.logger.debug(variable.standardization_info)
 
     def append_static_variable(self, variable):
         if 'sample' in variable.x_train.dims:
             return
+        
+        if len(variable.x_train.dims) == 2:
+            self.logger.debug(f"Appending an extra dimension")
+            variable.x_train = variable.x_train.expand_dims(channel=1)
+            variable.x_validate = variable.x_validate.expand_dims(channel=1)
+            variable.x_test = variable.x_test.expand_dims(channel=1)
 
         nsamples = self.x_train.shape[0]
         variable.x_train = variable.x_train.expand_dims(sample=nsamples)
@@ -175,7 +183,7 @@ class DataSet:
             self.Y_test = np.concatenate([self.Y_test, variable.Y_test], axis=1)
     
     def log_shape(self):
-        self.logger.debug(
+        self.logger.info(
           f"Shapes | "
           f"x_train: {self.x_train.shape}, "
           f"Y_train: {self.Y_train.shape}, "
@@ -184,5 +192,5 @@ class DataSet:
           f"x_test: {self.x_test.shape}, "
           f"Y_test: {self.Y_test.shape}"
         )
-        self.logger.debug(f"Channels: {self.x_description}")
-        self.logger.debug(f"Targets: {self.y_description}")
+        self.logger.info(f"Channels: {self.x_description}")
+        self.logger.info(f"Targets: {self.y_description}")

@@ -74,7 +74,43 @@ SIC = {'variable_name': var_name,
             'fill_nan_method': 'ocean_mask'
             }
 
-VARS = [T_REF, T_SURF, T850, SLP, Z500, SST, SIC]
+var_name = 'swdn_toa'
+SWDN_TOA = {'variable_name': var_name,
+            'file_name': f'DATA/atmos.192101-201012.{var_name}.nc',
+            'split_data_info': split_data_info,
+            'output_file_name': f"PP_DATA/{var_name}.192101-201012.nc",
+            'add_spatial_coordinates': False,
+            'standardize': True,
+            'fill_nan_method': 'crash'
+            }
+
+var_name = 'land_mask'
+LAND_MASK = {'variable_name': var_name,
+            'file_name': 'DATA/atmos.static.nc',
+            'split_data_info': split_data_info,
+            'output_file_name': f"PP_DATA/{var_name}.nc",
+            'add_spatial_coordinates': False,
+            'standardize': False,
+            'fill_nan_method': 'crash',
+            'is_static': True
+            }
+
+var_name = 'zsurf'
+ZSURF = {'variable_name': var_name,
+            'file_name': 'DATA/atmos.static.nc',
+            'split_data_info': split_data_info,
+            'output_file_name': f"PP_DATA/{var_name}_normalized.nc",
+            'add_spatial_coordinates': False,
+            'standardize': True,
+            'fill_nan_method': 'crash',
+            'is_static': True
+            }
+
+
+#VARS = [T_REF, T_SURF, T850, SLP, Z500, SST, SIC]
+#VARS = [SWDN_TOA]
+#VARS = [LAND_MASK]
+VARS = [ZSURF]
 
 for var_info in VARS:
-    procress_variable(var_info)
+    procress_variable(var_info, debug=True)

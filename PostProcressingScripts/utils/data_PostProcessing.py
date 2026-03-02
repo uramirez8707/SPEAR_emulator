@@ -181,7 +181,13 @@ class VarData:
 
         self.dump_spatial_features()
 
-def procress_variable(var_info):
+    def dump_static_output(self, output_file):
+        self.logger.debug(f"Dumping static file: {output_file}")
+        data_vars = {self.variable_name: self.data}
+        ds = xr.Dataset(data_vars)
+        ds.to_netcdf(output_file)
+
+def procress_variable(var_info, debug=False):
     variable_name = var_info['variable_name']
     file_name = var_info['file_name']
     split_data_info = var_info['split_data_info']
@@ -189,20 +195,23 @@ def procress_variable(var_info):
     add_spatial_coordinates = var_info['add_spatial_coordinates']
     standardize = var_info['standardize']
     fill_nans_method = var_info['fill_nan_method']
+    is_static = var_info.get('is_static', False)
 
     VAR = VarData(variable_name, file_name, split_data_info,
               add_spatial_coordinates=add_spatial_coordinates,
               standardize=standardize,
-              fill_nans_method=fill_nans_method)
+              fill_nans_method=fill_nans_method, debug=debug)
 
     VAR.load_data()
     VAR.interpolate_data()
     VAR.fill_NaNs()
-    VAR.fill_spatial_coordinates()
-    VAR.split_data_set()
-    VAR.standarize_data_set()
-    VAR.dump_data(output_file=output_file_name)
-
+    if is_static:
+        VAR.dump_static_output(output_file=output_file_name)
+    else:
+        VAR.fill_spatial_coordinates()
+        VAR.split_data_set()
+        VAR.standarize_data_set()
+        VAR.dump_data(output_file=output_file_name)
 
 def get_sum_over_dimension(file_name, var_name, dim_name):
     data_file = xr.open_mfdataset(file_name, combine='by_coords', decode_timedelta=True)
