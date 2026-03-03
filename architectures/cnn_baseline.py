@@ -563,17 +563,15 @@ class Results:
             raise RuntimeError("The run type is not valid!")
 
     def forecast_rollout(self, Model):
-        add_y_actual = False
+        add_y_actual = True
         if self.output is None:
             self.output = []
-            add_y_actual = True
         self.output.append(Model.forecast_rollout(self.lon, self.lat, add_y_actual))
 
     def predict_with_groud_truth(self, Model):
         add_y_actual = False
         if self.output is None:
             self.output = []
-            add_y_actual = True
             self.output.append(Model.get_persistence_baseline(self.lon, self.lat))
         self.output.append(Model.predict_with_ground_truth(self.lon, self.lat, add_y_actual))
 
@@ -685,6 +683,9 @@ class Results:
                      l = min(l, lower_bound)
 
         fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        if num_models == 1:
+            axes = [axes]
+
         for idx, Model in enumerate(self.output):
             ax = axes[idx]
             i = nlags
@@ -700,7 +701,7 @@ class Results:
                     ax.set_title(f"{target}: Global RMSE for {Model.label} Model")
                     ax.set_ylim(l, u)
                     ax.grid(True, alpha=0.3)
-                    ax.set_ylabel(f"RMSE ({units})")
+                    ax.set_ylabel(f"{target} ({units})")
                     x_num = np.array([d.toordinal() for d in time_converted[i:]])
                     slope, intercept = np.polyfit(x_num, variable['temporal_RMSE'], 1)
                     slope_text = f"Slope = {slope:.3e}"
@@ -716,10 +717,17 @@ class Results:
                     prediction = variable['prediction'].mean(axis=(1, 2))
                     rmse = variable['temporal_RMSE']
 
+                    actual = variable['y_actual'].mean(axis=(1, 2))
+
                     ax.plot(time_converted[i:], prediction,
-                            color='black', label='Avg t_ref', linewidth=1.5)
+                            color='black', label=f'Avg {target} (Predicted)', linewidth=1.5)
+                    
+                    ax.plot(time_converted[i:], actual,
+                            color='red', linestyle='dashed', label=f'Avg {target} (Actual)', linewidth=1.5)
+
                     ax.fill_between(time_converted[i:], prediction - rmse,
                                     prediction + rmse, color='blue', alpha=0.2, label='± RMSE')
+                    ax.legend()
             if not found:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 
