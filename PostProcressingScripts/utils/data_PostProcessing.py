@@ -133,15 +133,16 @@ class VarData:
         if self.data.isnull().any():
             self.logger.debug("The data contains NaN values")
 
-            if self.fill_nans_method == "ocean_mask":
-                self.logger.debug("Assuming that the NaN are values over land")
-            elif self.fill_nans_method == "pressure_mask":
-                self.logger.debug("Assuming that the NaN are at the surface")
-            else:
+            if self.fill_nans_method == "crash":
                 raise RuntimeError("Please provide a method to fill the NaN values")
+
+            if "PP_DATA/zsurf.nc" == self.fill_nans_method:
+                self.logger.debug(f"Filling the NaNs with data from {self.fill_nans_method}")
+                file = xr.open_mfdataset(self.fill_nans_method, combine='by_coords', decode_timedelta=True)
+
+                zsurf = file['zsurf']
+                self.data = self.data.fillna(zsurf)
             
-            self.mask = self.data.isnull().any(dim=("time"))
-            self.data = self.data.fillna(0.0)
 
     def dump_spatial_features(self):
         if self.spatial_features is None:
