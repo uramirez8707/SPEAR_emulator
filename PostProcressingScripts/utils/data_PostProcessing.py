@@ -9,8 +9,8 @@ logging.basicConfig(
 )
 
 def get_target_grid():
-    lat_target = np.arange(-89.5, 90.5, 2.0)
-    lon_target = np.arange(0.5, 360.5, 4.0)
+    lat_target = np.arange(-89.5, 90.5, 1.0)
+    lon_target = np.arange(0.5, 360.5, 1.0)
 
     grid_out = xr.Dataset(
     {
