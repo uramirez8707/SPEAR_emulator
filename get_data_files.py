@@ -12,7 +12,7 @@ def dmgetmagic(x):
 frequency = "mon"
 realm = "atmos"
 chunk_freq = "90yr"
-variables = ["ucomp", "vcomp", "omega", "hght", "sphum", "precip", "t_ref", "ps"]
+variables = ["temp", "t_surf", "ucomp", "vcomp", "omega", "hght", "sphum", "precip", "t_ref", "ps", "swdn_toa"]
 
 working_path = "/work/unr/SPEAR_emulator/RawData"
 pattern = r"(pp_ens_\d{2})"

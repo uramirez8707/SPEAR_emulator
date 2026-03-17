@@ -8,22 +8,10 @@ logging.basicConfig(
     format="%(name)s - %(message)s"
 )
 
-def get_target_grid():
-    lat_target = np.arange(-89.5, 90.5, 1.0)
-    lon_target = np.arange(0.5, 360.5, 1.0)
-
-    grid_out = xr.Dataset(
-    {
-        "lat": (["lat"], lat_target),
-        "lon": (["lon"], lon_target),
-    }
-    )
-    return grid_out
-
 class VarData:
     def __init__(self, variable_name, file_name, split_data_info,
                  fill_method='zero-ed', add_spatial_coordinates=False,
-                 standardize=True, fill_nans_method='crash', debug=False):
+                 standardize=True, fill_nans_method={}, nx=1, ny=1, debug=False):
         self.variable_name = variable_name
         self.filename = file_name
         self.data = None
@@ -36,6 +24,8 @@ class VarData:
         self.split_data_info = split_data_info
         self.standardize = standardize
         self.fill_nans_method = fill_nans_method
+        self.nx = nx
+        self.ny = ny
         if debug:
             self.logger.setLevel(logging.DEBUG)
 
@@ -45,11 +35,30 @@ class VarData:
         self.data = file[self.variable_name]
         self.units = self.data.attrs.get('units', 'None')
 
+    def get_target_grid(self):
+        lat_target = np.arange(-89.5, 90.5, self.ny)
+        lon_target = np.arange(0.5, 360.5, self.nx)
+
+        grid_out = xr.Dataset(
+        {
+            "lat": (["lat"], lat_target),
+            "lon": (["lon"], lon_target),
+        }
+        )
+
+        target_chunks = {
+            "lat": len(lat_target),
+            "lon": len(lon_target),
+            "time": 1
+        }
+        return grid_out, target_chunks
+
     def interpolate_data(self):
         self.logger.debug("Interpolatating to the target grid")
-        target_grid = get_target_grid()
-        regridder = xe.Regridder(self.data, target_grid, method="bilinear")
-        self.data = regridder(self.data)
+        target_grid, target_chunks = self.get_target_grid()
+        regridder = xe.Regridder(self.data, target_grid,
+                                 method="bilinear")
+        self.data = regridder(self.data, output_chunks=target_chunks)
 
     def fill_spatial_coordinates(self):
         if not self.add_spatial_coordinates:
@@ -133,16 +142,13 @@ class VarData:
         if self.data.isnull().any():
             self.logger.debug("The data contains NaN values")
 
-            if self.fill_nans_method == "crash":
+            if self.fill_nans_method['method'] == "crash":
                 raise RuntimeError("Please provide a method to fill the NaN values")
-
-            if "PP_DATA/zsurf.nc" == self.fill_nans_method:
-                self.logger.debug(f"Filling the NaNs with data from {self.fill_nans_method}")
-                file = xr.open_mfdataset(self.fill_nans_method, combine='by_coords', decode_timedelta=True)
-
-                zsurf = file['zsurf']
-                self.data = self.data.fillna(zsurf)
             
+            self.mask = self.data.isnull()
+
+            if self.fill_nans_method['method'] == "set_to_value":
+                self.data = self.data.fillna(self.fill_nans_method['value'])
 
     def dump_spatial_features(self):
         if self.spatial_features is None:
@@ -172,8 +178,8 @@ class VarData:
             data_vars["mean"] = self._data_mean
             data_vars["std"] = self._data_std
 
-        if self.mask is not None and self.fill_nans_method == "pressure_mask":
-            self.logger.debug("Adding a pressure mask to the file")
+        if self.mask is not None:
+            self.logger.debug("Adding a mask to the file")
             data_vars['mask'] = self.mask
 
         ds = xr.Dataset(data_vars)
@@ -197,11 +203,16 @@ def procress_variable(var_info, debug=False):
     standardize = var_info['standardize']
     fill_nans_method = var_info['fill_nan_method']
     is_static = var_info.get('is_static', False)
+    nx = var_info.get('nx', 1)
+    ny = var_info.get('ny', 1)
+
 
     VAR = VarData(variable_name, file_name, split_data_info,
               add_spatial_coordinates=add_spatial_coordinates,
               standardize=standardize,
-              fill_nans_method=fill_nans_method, debug=debug)
+              fill_nans_method=fill_nans_method,
+              nx=nx, ny=ny, 
+              debug=debug)
 
     VAR.load_data()
     VAR.interpolate_data()

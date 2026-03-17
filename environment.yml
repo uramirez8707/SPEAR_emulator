@@ -1,0 +1,27 @@
+name: spear_emulator
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - xarray
+  - dask
+  - netcdf4
+  - h5netcdf
+  - cftime
+  - xesmf
+  - cartopy
+  - matplotlib
+  - scikit-learn
+  - pyyaml
+  - pillow
+  - imagemagick
+  - scipy
+  - pytorch
+  - cudatoolkit=11.8
+  - pip
+  - pip:
+      - torch-harmonics

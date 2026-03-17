@@ -194,3 +194,9 @@ class DataSet:
         )
         self.logger.info(f"Channels: {self.x_description}")
         self.logger.info(f"Targets: {self.y_description}")
+
+def get_variable_info(yaml_data, variable_name):
+    for item in yaml_data:
+        if item.get('variable_name') == variable_name:
+            return item
+    return None
