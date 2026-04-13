@@ -203,8 +203,8 @@ def procress_variable(var_info, debug=False):
     standardize = var_info['standardize']
     fill_nans_method = var_info['fill_nan_method']
     is_static = var_info.get('is_static', False)
-    nx = var_info.get('nx', 1)
-    ny = var_info.get('ny', 1)
+    nx = var_info.get('nx', 4)
+    ny = var_info.get('ny', 2)
 
 
     VAR = VarData(variable_name, file_name, split_data_info,
