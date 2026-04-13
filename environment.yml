@@ -1,7 +1,8 @@
 name: spear_emulator
 channels:
-  - conda-forge
   - pytorch
+  - nvidia
+  - conda-forge
   - defaults
 dependencies:
   - python=3.11
@@ -21,7 +22,9 @@ dependencies:
   - imagemagick
   - scipy
   - pytorch
-  - cudatoolkit=11.8
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.4
   - pip
   - pip:
       - torch-harmonics
