@@ -10,6 +10,7 @@ import cartopy.feature as cfeature
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from sklearn.metrics import r2_score
 import itertools
+import time
 
 import logging
 import cftime
@@ -165,15 +166,19 @@ class CNN2D(nn.Module):
     def train(self):
         # Check if a model already exists, load it and move on to testing:
         path = Path(self.out_path)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         if path.exists():
-            self.checkpoint = torch.load(self.out_path, weights_only=False)
+            self.checkpoint = torch.load(self.out_path, map_location=device, weights_only=False)
             self.model.load_state_dict(self.checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(self.checkpoint['optimizer_state_dict'])
             self.val_losses = self.checkpoint['val_losses']
             self.train_losses = self.checkpoint['train_losses']
             return
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.logger.info(f"/n --- Starting Model Training ---")
+        start_time = time.perf_counter()
+
         self.model.to(device)
 
         criterion = nn.MSELoss()
@@ -248,9 +253,11 @@ class CNN2D(nn.Module):
                                      f"Validation Loss ({target}): {epoch_val_losses[target][-1]:.4f}")
 
         self.save_checkpoint(epoch_train_losses, epoch_val_losses)
-        self.logger.info("Training completed.")
+        end_time = time.perf_counter()
+        training_time = end_time - start_time
+        self.logger.info(f"Training completed in {training_time:.4f} seconds")
 
-    def plot_loss_over_epochs(self):
+    def plot_loss_over_epochs(self, figname=None):
         plt.figure(figsize=(12, 6))
 
         prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -274,11 +281,19 @@ class CNN2D(nn.Module):
         plt.title("Model Convergence: Loss over Epochs")
 
         plt.yscale('log')
-        plt.ylim(bottom=min(min(self.train_losses[t]) for t in self.targets) * 0.8, top=0.5)
+        min_loss = min(min(self.train_losses[t]) for t in self.targets + min(min(self.val_losses[t]) for t in self.targets))
+        lower_limit = min_loss * 0.8
+        upper_limit = max(1.0, max(max(self.train_losses[t]) for t in self.targets), max(max(self.val_losses[t]) for t in self.targets)) * 1.2
+        lower_limit = max(lower_limit, 1e-10)
+
+        plt.ylim(bottom=lower_limit, top=upper_limit)
         plt.grid(True, which="both", linestyle="--", alpha=0.4)
         plt.legend(loc='upper right', frameon=True)
         plt.tight_layout()
-        plt.show()
+        if figname is None:
+            plt.show()
+        else:
+            plt.savefig(figname)
 
     def predict_with_ground_truth(self, lon, lat, add_y_actual):
         self.model.eval()
@@ -334,7 +349,7 @@ class CNN2D(nn.Module):
                     X_next[:, lag_indices[-1]] = y[:, i]
                 X = X_next
 
-        y_prediction = y_prediction.numpy()
+        y_prediction = y_prediction.detach().cpu().numpy()
         
         # Convert back to physical units
         y_prediction = self.inverse_transform(y_prediction)
@@ -575,7 +590,7 @@ class Results:
             self.output.append(Model.get_persistence_baseline(self.lon, self.lat))
         self.output.append(Model.predict_with_ground_truth(self.lon, self.lat, add_y_actual))
 
-    def plot_regional_RMSE(self, target):
+    def plot_regional_RMSE(self, target, figname=None):
         regional_RMSE = []
         model_labels = []
         for Model in self.output:
@@ -621,7 +636,10 @@ class Results:
 
         ax.grid(axis="y", alpha=0.3)
         plt.tight_layout()
-        plt.show()
+        if figname is None:
+            plt.show()
+        else:
+            plt.savefig(figname)
 
     def plot_global_RMSE(self, target, output_statics=False):
         rmse_values = []
@@ -662,7 +680,7 @@ class Results:
                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.show()
 
-    def plot_temporal_RMSE(self, target, time_test, nlags=3):
+    def plot_temporal_RMSE(self, target, time_test, nlags=3, figname=None):
         time_converted = time_test.to_index().to_datetimeindex()
 
         l = float('inf')
@@ -732,7 +750,10 @@ class Results:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 
         plt.tight_layout()
-        plt.show()
+        if figname is None:
+            plt.show()
+        else:
+            plt.savefig(figname)
 
     def plot_spatial_RMSE(self, target, lon, lat):
         num_models = len(self.output)
@@ -792,7 +813,7 @@ class Results:
         plt.tight_layout()
         plt.show()
 
-    def plot_scatter_y_pred_vs_y_actual(self, target, n=1000, random_seed=42):
+    def plot_scatter_y_pred_vs_y_actual(self, target, n=1000, random_seed=42, figname=None):
         num_models = len(self.output)
         y_actual = None
         np.random.seed(random_seed)
@@ -837,7 +858,10 @@ class Results:
                 raise RuntimeError(f"Unable to determine the results for {target} in model {Model.label}")
 
         plt.tight_layout()
-        plt.show()
+        if figname is None:
+            plt.show()
+        else:
+            plt.savefig(figname)
 
 
 def run_configuration_ens(configurations, data, nepochs=20, nruns=20,
