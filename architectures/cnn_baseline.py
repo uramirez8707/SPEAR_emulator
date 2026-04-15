@@ -281,9 +281,16 @@ class CNN2D(nn.Module):
         plt.title("Model Convergence: Loss over Epochs")
 
         plt.yscale('log')
-        min_loss = min(min(self.train_losses[t]) for t in self.targets + min(min(self.val_losses[t]) for t in self.targets))
+
+        min_train_loss = min(min(self.train_losses[t]) for t in self.targets)
+        min_val_loss = min(min(self.val_losses[t]) for t in self.targets)
+
+        min_loss = min(min_train_loss, min_val_loss)
+
         lower_limit = min_loss * 0.8
-        upper_limit = max(1.0, max(max(self.train_losses[t]) for t in self.targets), max(max(self.val_losses[t]) for t in self.targets)) * 1.2
+        upper_limit = max(1.0,
+                  max(max(self.train_losses[t]) for t in self.targets),
+                  max(max(self.val_losses[t]) for t in self.targets)) * 1.2
         lower_limit = max(lower_limit, 1e-10)
 
         plt.ylim(bottom=lower_limit, top=upper_limit)
@@ -819,6 +826,9 @@ class Results:
         np.random.seed(random_seed)
 
         fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        if num_models == 1:
+            axes = [axes]
+
         for idx, Model in enumerate(self.output):
             ax = axes[idx]
             found = False
