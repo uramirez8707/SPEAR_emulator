@@ -54,7 +54,7 @@ class CNN2D(nn.Module):
             lats = torch.tensor(lats, dtype=torch.float32).to(device)
             weights = torch.cos(torch.deg2rad(lats))
             weights = weights / weights.mean()
-            self.weights = weights.view(1, 1, -1, 1)
+            self.weights = weights.view(1, -1, 1)
 
         if case > 3:
             self.model = construct_model(self.in_channels, self.out_channels, filters)            
@@ -160,8 +160,8 @@ class CNN2D(nn.Module):
                     val_preds = self.model(x_val)
 
                     for i, target in enumerate(self.targets):
-                        pixel_mse = criterion(val_preds[:, i], y_batch[:, i])
-                        weighted_val_mse = (pixel_mse * lat_weights).mean()
+                        pixel_mse = criterion(val_preds[:, i], y_val[:, i])
+                        weighted_val_mse = (pixel_mse * self.weights).mean()
                         batch_val_losses[target] += weighted_val_mse.item() * x_val.size(0)
 
                     total_val_samples += x_val.size(0)
