@@ -129,7 +129,7 @@ class CNN2D(nn.Module):
                 current_batch_losses = []
 
                 for i, target in enumerate(self.targets):
-                    pixel_mse = criterion(preds[:, i], y_batch[:, i])
+                    pixel_mse = criterion(preds[:, i], Y_batch[:, i])
                     weighted_mse = (pixel_mse * self.weights).mean()
                     total_loss += weighted_mse
                     current_batch_losses.append(weighted_mse.item())
