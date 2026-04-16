@@ -36,7 +36,7 @@ def set_seed(seed=42):
 class CNN2D(nn.Module):
     def __init__(self, data, num_epochs=50, batch_size=32, lr=1e-3, case=0,
                  filters=(16, 32, 32), weight_decay=0, optimizer="Adam",
-                 label="baseline", debug=True):
+                 label="baseline", lats=None, debug=True):
         super(CNN2D, self).__init__()
 
         self.logger = logging.getLogger(label)
@@ -45,6 +45,16 @@ class CNN2D(nn.Module):
 
         self.in_channels = data.x_train.shape[1]
         self.out_channels = data.Y_train.shape[1]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.logger.debug(f"You are running this code on {device}")
+
+        if lats is not None:
+            self.use_latitude_weights = True
+            lats = torch.tensor(lats.values, dtype=torch.float32).to(device)
+            weights = torch.cos(torch.deg2rad(lats))
+            weights = weights / weights.mean()
+            self.weights = weights.view(1, -1, 1)
 
         if case > 3:
             self.model = construct_model(self.in_channels, self.out_channels, filters)            
@@ -95,7 +105,7 @@ class CNN2D(nn.Module):
 
         self.model.to(device)
 
-        criterion = nn.MSELoss()
+        criterion = nn.MSELoss(reduction='none')
 
         train_loader, validate_loader = self.create_data_tensors()
 
@@ -119,9 +129,10 @@ class CNN2D(nn.Module):
                 current_batch_losses = []
 
                 for i, target in enumerate(self.targets):
-                    target_loss = criterion(preds[:, i], Y_batch[:, i])
-                    current_batch_losses.append(target_loss.item())
-                    total_loss += target_loss
+                    pixel_mse = criterion(preds[:, i], Y_batch[:, i])
+                    weighted_mse = (pixel_mse * self.weights).mean()
+                    total_loss += weighted_mse
+                    current_batch_losses.append(weighted_mse.item())
 
                 total_loss.backward()
                 self.optimizer.step()
@@ -149,8 +160,9 @@ class CNN2D(nn.Module):
                     val_preds = self.model(x_val)
 
                     for i, target in enumerate(self.targets):
-                        specific_val_loss = criterion(val_preds[:, i], y_val[:, i])
-                        batch_val_losses[target] += specific_val_loss.item() * x_val.size(0)
+                        pixel_mse = criterion(val_preds[:, i], y_val[:, i])
+                        weighted_val_mse = (pixel_mse * self.weights).mean()
+                        batch_val_losses[target] += weighted_val_mse.item() * x_val.size(0)
 
                     total_val_samples += x_val.size(0)
 
