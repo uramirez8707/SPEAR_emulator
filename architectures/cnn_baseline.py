@@ -62,7 +62,7 @@ class CNN2D(nn.Module):
             self.weights = weights.view(1, -1, 1)
 
         if case > 3:
-            self.model = construct_model(self.in_channels, self.out_channels, filters)            
+            self.model = construct_model(self.in_channels, self.out_channels, filters)
         else:
             self.model = get_model_archirecture(case, self.in_channels, self.out_channels)
 
@@ -251,10 +251,16 @@ class CNN2D(nn.Module):
         output = ModelOutput(label, y_test, y_pred,
                             self.targets, self.data.standardization_info,
                             lon, lat, add_y_actual)
-    
+
         return output
-    
-    def forecast_rollout(self, lon, lat, add_y_actual):
+
+    def forecast_rollout(self, lon, lat, add_y_actual, use_residual=False):
+        if use_residual:
+            forecast_rollout_residual(self, lon, lat, add_y_actual)
+        else:
+            forecast_rollout_absolute(self, lon, lat, add_y_actual)
+
+    def forecast_rollout_absolute(self, lon, lat, add_y_actual):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.eval()
         self.model.to(device)
@@ -290,7 +296,7 @@ class CNN2D(nn.Module):
                 X = X_next
 
         y_prediction = y_prediction.detach().cpu().numpy()
-        
+
         # Convert back to physical units
         y_prediction = self.inverse_transform(y_prediction)
         y_test = self.inverse_transform(self.data.Y_test)
@@ -298,7 +304,64 @@ class CNN2D(nn.Module):
         output = ModelOutput(label, y_test, y_prediction,
                             self.targets, self.data.standardization_info,
                             lon, lat, add_y_actual)
-    
+
+        return output
+
+    def forecast_rollout_residual(self, lon, lat, add_y_actual):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.eval()
+        self.model.to(device)
+
+        y_test = torch.tensor(self.data.Y_test, dtype=torch.float32).to(device) # (physical units)
+        x_test = torch.tensor(self.data.x_test, dtype=torch.float32).to(device) # (normalized)
+        mappings = self.get_mappings()
+
+        nsteps = y_test.shape[0]
+        self.logger.debug(f"Doing inference for {nsteps} time steps")
+
+        y_prediction = torch.zeros_like(y_test)
+        with torch.no_grad():
+            X = x_test[0:1] # Initial condition
+
+            for t in range(nsteps):
+                dy = self.model(X)
+
+                if t == nsteps - 1:
+                    break
+
+                # Copy the data for the next time step
+                X_next = x_test[t+1:t+2].clone()
+
+                # Overwrite ONLY the targets that were predicted
+                for i, target in enumerate(self.targets):
+                    lag_indices = mappings[i]
+
+                    # Get the most recent known value (t-1) for the current target
+                    y0 = X[0, lag_indices[-1]]
+
+                    # Get the new prediction for the current target
+                    y_target = y0 + dy[0,i]
+
+                    # Save the new prediction to the output tensor
+                    y_prediction[t, i] = y_target
+
+                    for j in range(len(lag_indices) - 1):
+                        X_next[:, lag_indices[j]] = X[:, lag_indices[j + 1]]
+
+                    X_next[:, lag_indices[-1]] = y_target
+
+                X = X_next
+
+        y_prediction = y_prediction.detach().cpu().numpy()
+
+        # Convert back to physical units
+        y_prediction = self.inverse_transform(y_prediction)
+        y_test = self.inverse_transform(self.data.Y_test)
+        label = f"{self.label}"
+        output = ModelOutput(label, y_test, y_prediction,
+                            self.targets, self.data.standardization_info,
+                            lon, lat, add_y_actual)
+
         return output
 
     def get_standardization_info(self, target):
@@ -502,7 +565,7 @@ class ModelOutput:
                 return info['original_units']
 
         raise RuntimeError(f"Unable to find orginial units for {target}")
-    
+
 class Results:
     def __init__(self, longitude, latitude):
         self.output = None
@@ -602,7 +665,7 @@ class Results:
         x = np.arange(len(model_labels))
         bars = plt.bar(x, rmse_values, color='tab:blue', alpha=0.75, edgecolor='black', linewidth=0.5)
         plt.bar_label(bars, padding=3, fmt='%.3f', fontweight='bold')
-    
+
         plt.xticks(x, model_labels, rotation=30)
         plt.ylabel(f"RMSE ({units})")
         plt.title(f"Global RMSE Comparison by Model and {target}")
@@ -633,10 +696,10 @@ class Results:
                  if variable['target'] == target:
                      prediction = variable['prediction'].mean(axis=(1, 2))
                      rmse = variable['temporal_RMSE']
-                     
+
                      upper_bound = np.max(prediction + rmse)
                      lower_bound = np.min(prediction - rmse)
-                     
+
                      u = max(u, upper_bound)
                      l = min(l, lower_bound)
 
@@ -649,7 +712,7 @@ class Results:
             i = nlags
             if Model.label == "Persistence":
                 i = nlags + 1
-    
+
             found = False
             for variable in Model.RMSE:
                 if variable['target'] == target:
@@ -679,7 +742,7 @@ class Results:
 
                     ax.plot(time_converted[i:], prediction,
                             color='black', label=f'Avg {target} (Predicted)', linewidth=1.5)
-                    
+
                     ax.plot(time_converted[i:], actual,
                             color='red', linestyle='dashed', label=f'Avg {target} (Actual)', linewidth=1.5)
 

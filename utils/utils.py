@@ -10,7 +10,7 @@ logging.basicConfig(
 )
 
 class VarSet:
-    def __init__(self, var_name, file_name, is_output=False, is_static=False, debug=False):
+    def __init__(self, var_name, file_name, is_output=False, is_static=False, debug=False, use_residual=False):
         self.logger = logging.getLogger(var_name)
         if debug:
            self.logger.setLevel(logging.DEBUG)
@@ -30,7 +30,7 @@ class VarSet:
         self.x_description = ""
         self.y_description = ""
         self.standardization_info = {}
-
+        self.use_residual = use_residual
         self.procress_variable()
 
     def get_data_set(self, var_name):
@@ -51,13 +51,17 @@ class VarSet:
         X = np.moveaxis(X, -1, 1)
         X = X[:-1]
         self.logger.debug(f"Lagged X shape: {X.shape}")
+
         self.x_description = [f"{self.var_name}(t-{k})" for k in range(n_lags, 0, -1)]
 
         if self.is_output:
-            y = data_np[n_lags:, np.newaxis, :, :]
+            if self.use_residual:
+                y = data_np[n_lags:, np.newaxis, :, :] - data_np[n_lags-1:-1, np.newaxis, :, :]
+                self.y_description = [f"d{self.var_name}(t)"]
+            else:
+                y = data_np[n_lags:, np.newaxis, :, :]
+                self.y_description = [f"{self.var_name}(t)"]
             self.logger.debug(f"Lagged y shape: {y.shape}")
-            self.y_description = [f"{self.var_name}"]
-
         return X, y
     
     def procress_variable(self):
