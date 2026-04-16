@@ -51,7 +51,7 @@ class CNN2D(nn.Module):
 
         if lats is not None:
             self.use_latitude_weights = True
-            lats = torch.tensor(lats, dtype=torch.float32).to(device)
+            lats = torch.tensor(lats.values, dtype=torch.float32).to(device)
             weights = torch.cos(torch.deg2rad(lats))
             weights = weights / weights.mean()
             self.weights = weights.view(1, -1, 1)
