@@ -49,7 +49,7 @@ class CNN2D(nn.Module):
         self.logger.debug(f"You are running this code on {device}")
 
         if use_target_scales:
-            variances = np.var(self.data.Y_train, axis=(0, 2, 3))
+            variances = np.var(data.Y_train, axis=(0, 2, 3))
             self.target_scales = torch.tensor(variances, dtype=torch.float32).to(device)
         else:
             self.target_scales = torch.ones(self.out_channels).to(device)
