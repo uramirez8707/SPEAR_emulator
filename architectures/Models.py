@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.optim as optim
 
+
 def construct_model(in_channels, out_channels, filters):
     layers = []
 
@@ -36,6 +37,53 @@ def construct_model(in_channels, out_channels, filters):
                 output_padding=1 if i == len(reversed_filters) - 1 else 0
             ),
             nn.BatchNorm2d(f),
+            nn.ReLU(inplace=True)
+        ])
+        prev_channel = f
+
+    layers.append(
+        nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=1)
+    )
+
+    model = nn.Sequential(*layers)
+
+    return model
+
+def construct_model_GroupNorm(in_channels, out_channels, filters, num_groups=4):
+    layers = []
+
+    # Encoder
+    prev_channel = in_channels
+    for f in filters[:-1]:
+        layers.extend([
+            nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=1),
+            nn.GroupNorm(num_groups, f),
+            nn.ReLU(),
+        ])
+        prev_channel = f
+
+    # Bottleneck
+    bottleneck_channels = filters[-1]
+    layers.extend([
+        nn.Conv2d(prev_channel, bottleneck_channels, kernel_size=3, padding=1),
+        nn.GroupNorm(num_groups, bottleneck_channels),
+        nn.ReLU(inplace=True)
+    ])
+
+    # Decoder
+    reversed_filters = list(reversed(filters[:-1]))
+    prev_channel = bottleneck_channels
+
+    for i, f in enumerate(reversed_filters):
+        layers.extend([
+            nn.ConvTranspose2d(
+                prev_channel, f,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                output_padding=1 if i == len(reversed_filters) - 1 else 0
+            ),
+            nn.GroupNorm(num_groups, f),
             nn.ReLU(inplace=True)
         ])
         prev_channel = f
