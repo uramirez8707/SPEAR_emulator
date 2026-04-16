@@ -85,7 +85,7 @@ class CNN2D(nn.Module):
         self.logger.debug(f"Learning Rate: {self.lr}")
         self.logger.debug(f"Inputs: {self.data.x_description}")
         self.logger.debug(f"Targets: {self.targets}")
-
+        self.logger.debug(f"Using the following variables for each target: \n{self.target_scales}")
     def forward(self, x):
         return self.model(x)
 
