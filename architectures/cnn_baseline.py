@@ -37,7 +37,7 @@ class CNN2D(nn.Module):
     def __init__(self, data, num_epochs=50, batch_size=32, lr=1e-3, case=0,
                  filters=(16, 32, 32), weight_decay=0, optimizer="Adam",
                  label="baseline", lats=None, use_target_scales=False,
-                 use_GroupNorm=false, debug=True):
+                 use_GroupNorm=False, debug=True):
         super(CNN2D, self).__init__()
 
         self.logger = logging.getLogger(label)
