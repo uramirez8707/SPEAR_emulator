@@ -572,19 +572,19 @@ class Results:
         self.lat = latitude
         self.lon = longitude
 
-    def add_model_output(self, Model, run_type="ground_truth"):
+    def add_model_output(self, Model, run_type="ground_truth", use_residual=False):
         if run_type == "ground_truth":
             self.predict_with_groud_truth(Model)
         elif run_type == "forecast_rollout":
-            self.forecast_rollout(Model)
+            self.forecast_rollout(Model, use_residual=use_residual)
         else:
             raise RuntimeError("The run type is not valid!")
 
-    def forecast_rollout(self, Model):
+    def forecast_rollout(self, Model, use_residual):
         add_y_actual = True
         if self.output is None:
             self.output = []
-        self.output.append(Model.forecast_rollout(self.lon, self.lat, add_y_actual))
+        self.output.append(Model.forecast_rollout(self.lon, self.lat, add_y_actual, use_residual=use_residual))
 
     def predict_with_groud_truth(self, Model):
         add_y_actual = False
