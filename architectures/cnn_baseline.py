@@ -256,9 +256,9 @@ class CNN2D(nn.Module):
 
     def forecast_rollout(self, lon, lat, add_y_actual, use_residual=False):
         if use_residual:
-            forecast_rollout_residual(self, lon, lat, add_y_actual)
+            return self.forecast_rollout_residual(lon, lat, add_y_actual)
         else:
-            forecast_rollout_absolute(self, lon, lat, add_y_actual)
+            return self.forecast_rollout_absolute(lon, lat, add_y_actual)
 
     def forecast_rollout_absolute(self, lon, lat, add_y_actual):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -306,6 +306,19 @@ class CNN2D(nn.Module):
                             lon, lat, add_y_actual)
 
         return output
+
+    def transform_residual(self, dy):
+        x_normalized = self.data.x_test
+        y_normalized = np.zeros_like(dy)
+        mappings = self.get_mappings()
+
+        for i, target in enumerate(self.targets):
+            self.logger.debug(f"Transforming dy back to physical units for {target}")
+            y0 = x_normalized[0, mappings[i][-1]]
+            y_normalized[:, i] = np.cumsum(dy[:,i], axis=0) + y0
+
+        y = self.inverse_transform(y_normalized)
+        return y
 
     def forecast_rollout_residual(self, lon, lat, add_y_actual):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -355,8 +368,8 @@ class CNN2D(nn.Module):
         y_prediction = y_prediction.detach().cpu().numpy()
 
         # Convert back to physical units
-        y_prediction = self.inverse_transform(y_prediction)
-        y_test = self.inverse_transform(self.data.Y_test)
+        y_prediction = self.transform_residual(y_prediction)
+        y_test = self.transform_residual(self.data.Y_test)
         label = f"{self.label}"
         output = ModelOutput(label, y_test, y_prediction,
                             self.targets, self.data.standardization_info,
@@ -365,8 +378,10 @@ class CNN2D(nn.Module):
         return output
 
     def get_standardization_info(self, target):
+        clean_target = target.replace('d', '', 1).replace('(t)', '') # Clean up the target name (i.e dt_ref(t) becomes t_ref
+
         for info in self.data.standardization_info:
-            if target == info['var_name']:
+            if clean_target == info['var_name']:
                 return info['mean'], info['std']
         raise RuntimeError(f"Unable to find the get_standardization_info for {target}")
 
@@ -386,8 +401,10 @@ class CNN2D(nn.Module):
 
     def get_mappings(self):
         mappings = []
+
         for target in self.targets:
-            indices = [i for i, s in enumerate(self.data.x_description) if target in s]
+            clean_target = target.replace('d', '', 1).replace('(t)', '') # Clean up the target name (i.e dt_ref(t) becomes t_ref
+            indices = [i for i, s in enumerate(self.data.x_description) if clean_target in s]
             mappings.append(indices)
         return mappings
 
@@ -488,7 +505,9 @@ class ModelOutput:
         self.logger.debug(f"Size of the area weight:: {area_weights.shape}")
 
         for i, target in enumerate(self.targets):
-            self.logger.debug(f"Calculating RMSE for target: {target}")
+            clean_target = target.replace('d', '', 1).replace('(t)', '') # Clean up the target name (i.e dt_ref(t) becomes t_ref
+
+            self.logger.debug(f"Calculating RMSE for target: {clean_target}")
 
             target_err = err[:, i, :, :]
             sq_err = target_err ** 2
@@ -506,9 +525,9 @@ class ModelOutput:
 
             zonal_mean_bias = target_err.mean(axis=(0, 2))
 
-            units = self.get_var_units(target)
+            units = self.get_var_units(clean_target)
 
-            out = {'target': target,
+            out = {'target': clean_target,
                  'global_RMSE': global_RMSE,
                  'spatial_RMSE': spatial_RMSE,
                  'temporal_RMSE': temporal_RMSE,
@@ -560,8 +579,10 @@ class ModelOutput:
         return regional_rmse
 
     def get_var_units(self, target):
+        clean_target = target.replace('d', '', 1).replace('(t)', '') # Clean up the target name (i.e dt_ref(t) becomes t_ref
+
         for info in self.var_info:
-            if target == info['var_name']:
+            if clean_target == info['var_name']:
                 return info['original_units']
 
         raise RuntimeError(f"Unable to find orginial units for {target}")
@@ -690,6 +711,7 @@ class Results:
         u = float('-inf')
 
         num_models = len(self.output)
+        print(f"Number of Models: {num_models}")
         # First pass: find min and max across all models for consistent axis
         for Model in self.output:
             for variable in Model.RMSE:
@@ -720,7 +742,7 @@ class Results:
                     units = variable['units']
 
                     ax.set_title(f"{target}: Global RMSE for {Model.label} Model")
-                    ax.set_ylim(l, u)
+                    #ax.set_ylim(l, u)
                     ax.grid(True, alpha=0.3)
                     ax.set_ylabel(f"{target} ({units})")
                     x_num = np.array([d.toordinal() for d in time_converted[i:]])
