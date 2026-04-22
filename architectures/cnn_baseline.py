@@ -701,6 +701,9 @@ class Results:
         num_models = len(self.output)
         l = None
         fig, axes = plt.subplots(num_models, 1, figsize=(8, 5 * num_models), subplot_kw={'projection': ccrs.PlateCarree()})
+        if num_models == 1:
+            axes = [axes]
+
         for idx, Model in enumerate(self.output):
             found = False
 
@@ -733,6 +736,8 @@ class Results:
                         l = max(abs(variable['zonal_mean_bias']))
 
         fig, axes = plt.subplots(nrows=num_models, ncols=1, figsize=(12, 3 * num_models), sharex=True)
+        if num_models == 1:
+            axes = [axes]
         for idx, Model in enumerate(self.output):
             ax = axes[idx]
 
