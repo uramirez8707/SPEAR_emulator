@@ -60,6 +60,8 @@ class CNN2D(nn.Module):
             weights = torch.cos(torch.deg2rad(lats))
             weights = weights / weights.mean()
             self.weights = weights.view(1, -1, 1)
+        else:
+            self.weights = 1
 
         if case > 3:
             self.model = construct_model(self.in_channels, self.out_channels, filters)            
@@ -105,7 +107,7 @@ class CNN2D(nn.Module):
             self.train_losses = self.checkpoint['train_losses']
             return
 
-        self.logger.info(f"/n --- Starting Model Training ---")
+        self.logger.info(f"--- Starting Model Training ---")
         start_time = time.perf_counter()
 
         self.model.to(device)
