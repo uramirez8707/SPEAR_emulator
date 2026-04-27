@@ -10,7 +10,8 @@ logging.basicConfig(
 )
 
 class VarSet:
-    def __init__(self, var_name, file_name, is_output=False, is_static=False, debug=False):
+    def __init__(self, var_name, file_name, is_output=False, is_static=False, debug=False,
+                 nregressive_steps=1, nlags=3):
         self.logger = logging.getLogger(var_name)
         if debug:
            self.logger.setLevel(logging.DEBUG)
@@ -30,6 +31,11 @@ class VarSet:
         self.x_description = ""
         self.y_description = ""
         self.standardization_info = {}
+        self.nregressive_steps = nregressive_steps
+        self.nlags = nlags
+
+        if self.nregressive_steps != 1 and self.nlags != 1:
+            raise RuntimeError("Either nregressive_steps or nlags must be equal to 1!")
 
         self.procress_variable()
 
@@ -43,7 +49,14 @@ class VarSet:
         self.logger.debug(f"{var_name} data has shape {out_data.shape}")
         return out_data
     
-    def lag_data_set(self, data, n_lags=3):
+    def prepare_data(self, data):
+        if self.nlags != 1:
+            return self.prepare_lag_dataset(data)
+        else:
+            return self.prepare_autoregressive_dataset(data)
+    
+    def prepare_lag_dataset(self, data):
+        n_lags = self.nlags
         data_np = data.values
 
         y = None
@@ -60,6 +73,35 @@ class VarSet:
 
         return X, y
     
+    def prepare_autoregressive_dataset(self, data):
+        data_np = data.values
+
+        y = None
+        X = data_np[:-1, np.newaxis, :, :]
+        X = X[:-self.nregressive_steps]
+        self.logger.debug(f"Final X shape: {X.shape}")
+        self.x_description = [f"{self.var_name}(t)"]
+
+        if self.is_output:
+            y = data_np[1:, np.newaxis, :, :]
+            y = self.prepare_for_autoregressive(y)
+            self.logger.debug(f"Final y shape: {y.shape}")
+            self.y_description = [f"{self.var_name}"]
+
+        return X, y
+
+    def prepare_for_autoregressive(self, y):
+        self.logger.debug(f"Preparing y with {self.nregressive_steps} regressive steps")
+        T, C, H, W = y.shape
+        nsteps = self.nregressive_steps
+
+        Y_prime = np.zeros((T - nsteps, nsteps, C, H, W))
+
+        for t in range(T - nsteps):
+            for n in range(nsteps):
+                Y_prime[t, n, :, :, :] = y[t+n+1, :, :, :]
+        return Y_prime
+
     def procress_variable(self):
         if self.is_static:
             self.procress_static_variable()
@@ -97,9 +139,9 @@ class VarSet:
         validating = self.get_data_set("validating")
         testing = self.get_data_set("testing")
 
-        self.x_train, self.Y_train = self.lag_data_set(training)
-        self.x_validate, self.Y_validate = self.lag_data_set(validating)
-        self.x_test, self.Y_test = self.lag_data_set(testing)
+        self.x_train, self.Y_train = self.prepare_data(training)
+        self.x_validate, self.Y_validate = self.prepare_data(validating)
+        self.x_test, self.Y_test = self.prepare_data(testing)
 
     def get_grid(self):
         return self.file['lon'], self.file['lat']

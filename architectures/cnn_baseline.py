@@ -36,7 +36,8 @@ def set_seed(seed=42):
 class CNN2D(nn.Module):
     def __init__(self, data, num_epochs=50, batch_size=32, lr=1e-3, case=0,
                  filters=(16, 32, 32), weight_decay=0, optimizer="Adam",
-                 label="baseline", lats=None, use_target_scales=False, debug=True):
+                 label="baseline", lats=None, use_target_scales=False,
+                 nregressive_steps=1, debug=True):
         super(CNN2D, self).__init__()
 
         self.logger = logging.getLogger(label)
@@ -44,11 +45,12 @@ class CNN2D(nn.Module):
            self.logger.setLevel(logging.DEBUG)
 
         self.in_channels = data.x_train.shape[1]
-        self.out_channels = data.Y_train.shape[1]
+        self.out_channels = data.Y_train.shape[2]
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger.debug(f"You are running this code on {device}")
 
         if use_target_scales:
+            raise RuntimeError("If using target scales better fix this first!")
             variances = np.var(data.Y_train, axis=(0, 2, 3))
             self.target_scales = torch.tensor(variances, dtype=torch.float32).to(device)
         else:
@@ -76,6 +78,7 @@ class CNN2D(nn.Module):
         self.lr = lr
         self.checkpoint = None
         self.targets = self.data.y_description
+        self.nregressive_steps = nregressive_steps
 
         self.optimizer = define_optimizer(self.model, optimizer, lr, weight_decay)
 
@@ -87,7 +90,9 @@ class CNN2D(nn.Module):
         self.logger.debug(f"Learning Rate: {self.lr}")
         self.logger.debug(f"Inputs: {self.data.x_description}")
         self.logger.debug(f"Targets: {self.targets}")
-        self.logger.debug(f"Using the following variables for each target: \n{self.target_scales}")
+        self.logger.debug(f"Training with {self.nregressive_steps} autoregressive steps")
+        self.logger.debug(f"Using the following variables weights for each target: \n"
+                          f"---> {self.target_scales.tolist()}")
     def forward(self, x):
         return self.model(x)
 
@@ -118,6 +123,7 @@ class CNN2D(nn.Module):
 
         epoch_train_losses = {target: [] for target in self.targets}
         epoch_val_losses = {target: [] for target in self.targets}
+        mappings = self.get_mappings()
 
         for epoch in range(self.num_epochs):
             # Training Phase
@@ -125,22 +131,35 @@ class CNN2D(nn.Module):
             batch_train_losses = {target: 0.0 for target in self.targets}
             total_train_samples = 0
 
+            # Y_batch has size ntimes, nsteps, ntargets, nlat, nlon
+            # X_btach has size ntimes, nchannels, nlat, nlon
             for x_batch, Y_batch in train_loader:
                 x_batch = x_batch.to(device)
                 Y_batch = Y_batch.to(device)
 
                 self.optimizer.zero_grad()
-                preds = self.model(x_batch)
-
-                total_loss = 0.0
                 current_batch_losses = []
 
-                for i, target in enumerate(self.targets):
-                    pixel_mse = criterion(preds[:, i], Y_batch[:, i])
-                    weighted_mse = (pixel_mse * self.weights).mean()
-                    scaled_loss = weighted_mse / self.target_scales[i]
-                    total_loss += scaled_loss
-                    current_batch_losses.append(scaled_loss.item())
+                total_loss = 0.0
+                X_next = x_batch.clone()
+                for step in range(self.nregressive_steps):
+                    # pred is going to have the same size as x_batch
+                    pred = self.model(X_next)
+                    actual = Y_batch[:, step]
+
+                    for i, target in enumerate(self.targets):
+                        pixel_mse = criterion(pred[:, i], actual[:, i])
+                        weighted_mse = (pixel_mse * self.weights).mean()
+                        scaled_loss = weighted_mse / self.target_scales[i]
+                        total_loss += scaled_loss
+                        current_batch_losses.append(scaled_loss.item())
+
+                        # Update X so that the model prediction is now used as the
+                        # next input
+                        #TODO clean this up lol
+                        if self.nregressive_steps > 1:
+                            target_index = mappings[i]
+                            X_next[:, target_index] =  actual[:, i]
 
                 total_loss.backward()
                 self.optimizer.step()
