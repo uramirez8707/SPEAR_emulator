@@ -148,7 +148,7 @@ class CNN2D(nn.Module):
                     actual = Y_batch[:, step]
 
                     for i, target in enumerate(self.targets):
-                        pixel_mse = criterion(pred[:, i], actual[:, i])
+                        pixel_mse = criterion(pred[:, i:i+1], actual[:, i:i+1])
                         weighted_mse = (pixel_mse * self.weights).mean()
                         scaled_loss = weighted_mse / self.target_scales[i]
                         total_loss += scaled_loss
@@ -159,7 +159,8 @@ class CNN2D(nn.Module):
                         #TODO clean this up lol
                         if self.nregressive_steps > 1:
                             target_index = mappings[i]
-                            X_next[:, target_index] =  actual[:, i]
+                            X_next = X_next.clone()
+                            X_next[:, target_index] =  pred[:, i].unsqueeze(1)
 
                 total_loss.backward()
                 self.optimizer.step()
@@ -184,13 +185,21 @@ class CNN2D(nn.Module):
                     x_val = x_val.to(device)
                     y_val = y_val.to(device)
 
-                    val_preds = self.model(x_val)
+                    X_next_val = x_val.clone()
+                    for step in range(self.nregressive_steps):
+                        val_preds = self.model(X_next_val)
+                        actual_val = y_val[:, step]
 
-                    for i, target in enumerate(self.targets):
-                        pixel_mse = criterion(val_preds[:, i], y_val[:, i])
-                        weighted_val_mse = (pixel_mse * self.weights).mean()
-                        scaled_val_loss = weighted_val_mse / self.target_scales[i]
-                        batch_val_losses[target] += scaled_val_loss.item() * x_val.size(0)
+                        for i, target in enumerate(self.targets):
+                            pixel_mse = criterion(val_preds[:, i:i+1], actual_val[:, i:i+1])
+                            weighted_val_mse = (pixel_mse * self.weights).mean()
+                            scaled_val_loss = weighted_val_mse / self.target_scales[i]
+                            batch_val_losses[target] += scaled_val_loss.item() * x_val.size(0)
+
+                            if self.nregressive_steps > 1:
+                                target_index = mappings[i]
+                                X_next_val = X_next_val.clone()
+                                X_next_val[:, target_index] = val_preds[:, i:i+1]
 
                     total_val_samples += x_val.size(0)
 

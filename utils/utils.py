@@ -99,7 +99,7 @@ class VarSet:
 
         for t in range(T - nsteps):
             for n in range(nsteps):
-                Y_prime[t, n, :, :, :] = y[t+n+1, :, :, :]
+                Y_prime[t, n, :, :, :] = y[t+n, :, :, :]
         return Y_prime
 
     def procress_variable(self):
