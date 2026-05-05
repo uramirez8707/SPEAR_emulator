@@ -1,0 +1,160 @@
+dates:
+  start: '1851-01-01T06:00:00'
+  end: '1861-01-01T00:00:00'
+  frequency: 6h
+input:
+  join:
+  - concat:
+    - dates:
+        start: 1851-01-01T06
+        end: '1852-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18510101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1852-01-01T06
+        end: '1853-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18520101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1853-01-01T06
+        end: '1854-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18530101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1854-01-01T06
+        end: '1855-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18540101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1855-01-01T06
+        end: '1856-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18550101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1856-01-01T06
+        end: '1857-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18560101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1857-01-01T06
+        end: '1858-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18570101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1858-01-01T06
+        end: '1859-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18580101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1859-01-01T06
+        end: '1860-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18590101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+    - dates:
+        start: 1860-01-01T06
+        end: '1861-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/air_temperature_at_two_meters/18600101.air_temperature_at_two_meters.ens_01.nc
+        variable: air_temperature_at_two_meters
+  - concat:
+    - dates:
+        start: 1851-01-01T06
+        end: '1852-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18510101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1852-01-01T06
+        end: '1853-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18520101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1853-01-01T06
+        end: '1854-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18530101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1854-01-01T06
+        end: '1855-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18540101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1855-01-01T06
+        end: '1856-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18550101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1856-01-01T06
+        end: '1857-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18560101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1857-01-01T06
+        end: '1858-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18570101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1858-01-01T06
+        end: '1859-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18580101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1859-01-01T06
+        end: '1860-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18590101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+    - dates:
+        start: 1860-01-01T06
+        end: '1861-01-01'
+        frequency: 6h
+      netcdf:
+        path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/DSWRFtoa/18600101.DSWRFtoa.ens_01.nc
+        variable: DSWRFtoa
+  - repeated-dates:
+      mode: constant
+      source:
+        netcdf:
+          path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/land_fraction.nc
+          variable: land_fraction
+  - repeated-dates:
+      mode: constant
+      source:
+        netcdf:
+          path: /scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY/HGTsfc.nc
+          variable: HGTsfc

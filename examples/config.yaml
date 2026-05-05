@@ -1,0 +1,46 @@
+seed: 42
+
+paths:
+  input_dir: "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/ANEMOI-DATASETS"
+  training: "train_dataset.zarr"
+  validating: "val_dataset.zarr"
+  testing: "test_dataset.zarr"
+
+hyperparameters:
+  batch_size: 32
+  learning_rate: 0.0001
+
+data_config:
+  type: "default"     # "default" or "residual"
+  method:
+    name: "lags"      # "lags" or "autoregressive"
+    nlags: 3
+
+variables:
+  air_temperature_at_two_meters:
+    is_input: true
+    is_output: true
+    is_static: false
+    normalization: "z-score"
+    units: "K"
+
+  DSWRFtoa:
+    is_input: true
+    is_output: false
+    is_static: false
+    normalization: "z-score"
+    units: "W/m^2"
+
+  HGTsfc:
+    is_input: true
+    is_output: false
+    is_static: true
+    normalization: "z-score"
+    units: "m"
+
+  land_fraction:
+    is_input: true
+    is_output: false
+    is_static: true
+    normalization: "none"
+    units: "fraction"
