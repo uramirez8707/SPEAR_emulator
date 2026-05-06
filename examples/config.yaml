@@ -1,7 +1,7 @@
 seed: 42
 
 paths:
-  input_dir: "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/ANEMOI-DATASETS"
+  input_dir: "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/LIGHTING/anemoi_prep"
   training: "train_dataset.zarr"
   validating: "val_dataset.zarr"
   testing: "test_dataset.zarr"
