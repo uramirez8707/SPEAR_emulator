@@ -107,8 +107,8 @@ def get_tensor(config:configSetUp, dataset, mode):
     data_loader = DataLoader(
         final_set,
         batch_size=batch_size,
-        shuffle=False
-    )
+        shuffle=False,
+        num_workers = 16)
 
     return data_loader
 

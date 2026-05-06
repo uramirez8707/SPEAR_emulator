@@ -4,7 +4,7 @@ import pytorch_lightning as L
 from utils import configSetUp
 from pytorch_lightning.loggers import CSVLogger
 
-config = configSetUp(config_yaml="config.yaml")
+config = configSetUp(config_yaml="examples/config.yaml")
 config.dump_info()
 
 training, validating, testing  = get_dataloaders(config)
@@ -19,11 +19,16 @@ SPEAR = SpearEmulator(config)
 trainer = L.Trainer(
     max_epochs=10,
     logger=logger,
-    accelerator="auto", 
+    accelerator="auto",
     devices=1,
     deterministic=True,
     benchmark=False
 )
 
-trainer.fit(SPEAR, training)
-#print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
+trainer.fit(
+    model=SPEAR,
+    train_dataloaders=training,
+    val_dataloaders=validating
+)
+
+print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")

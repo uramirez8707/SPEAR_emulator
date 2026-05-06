@@ -79,12 +79,21 @@ class SpearEmulator(L.LightningModule):
         return self.model(x)
 
     def set_target_statistics(self, config):
-        self.y_means, self.y_stds = get_statistics(config, channel_type="output")
+        y_means, y_stds = get_statistics(config, channel_type="output")
+        y_means = torch.as_tensor(y_means, dtype=torch.float32)
+        y_stds = torch.as_tensor(y_stds, dtype=torch.float32)
+
+        self.register_buffer("y_means", y_means)
+        self.register_buffer("y_stds", y_stds)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
 
-        # Remove the third empty ensemble dimension for anemoi
+        if torch.isnan(x).any():
+            print(f"\n[Batch {batch_idx}] NaN detected in raw INPUTS (x)!")
+        if torch.isnan(y).any():
+            print(f"\n[Batch {batch_idx}] NaN detected in raw TARGETS (y)!")
+
         x = x.squeeze(2)
         y = y.squeeze(2)
 
@@ -95,6 +104,22 @@ class SpearEmulator(L.LightningModule):
         preds = self(x)
         loss = F.mse_loss(preds, y_norm)
         self.log("train_loss", loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+
+        x = x.squeeze(2)
+        y = y.squeeze(2)
+
+        x = x.view(x.size(0), x.size(1), self.nlat, self.nlon)
+        y = y.view(y.size(0), y.size(1), self.nlat, self.nlon)
+        y_norm = (y - self.y_means) / self.y_stds
+
+        preds = self(x)
+        loss = F.mse_loss(preds, y_norm)
+
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
