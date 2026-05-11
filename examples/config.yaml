@@ -16,11 +16,14 @@ data_config:
     name: "lags"      # "lags" or "autoregressive"
     nlags: 3
 
+use_coordinates: True
+
 variables:
   air_temperature_at_two_meters:
     is_input: true
     is_output: true
     is_static: false
+    target_weight: 1.0
     normalization: "z-score"
     units: "K"
 

@@ -24,8 +24,8 @@ create_split() {
 
     # Use sed to search for the "start:" and "end:" lines and replace the dates
     # (This assumes your baseline YAML has exactly "start: '...'" and "end: '...'")
-    sed -e "s/start: .*/start: '${START_DATE}'/" \
-        -e "s/end: .*/end: '${END_DATE}'/" \
+    sed -e "1,6s/start: .*/start: '${START_DATE}'/" \
+        -e "1,6s/end: .*/end: '${END_DATE}'/" \
         "$BASELINE" > "$TEMP_YAML"
 
     # Run the anemoi command using the new temporary recipe
@@ -37,12 +37,12 @@ create_split() {
 }
 
 # 1. Training Set (8 Years: 1851 - 1858)
-create_split "train" "1851-01-01T06:00:00" "1858-12-31T18:00:00"
+create_split "train" "1851-01-01T06:00:00" "1859-01-01T00:00:00"
 
 # 2. Validation Set (1 Year: 1859)
-create_split "val" "1859-01-01T00:00:00" "1859-12-31T18:00:00"
+create_split "val" "1859-01-01T06:00:00" "1860-01-01T00:00:00"
 
 # 3. Testing Set (1 Year: 1860)
-create_split "test" "1860-01-01T00:00:00" "1860-12-31T18:00:00"
+create_split "test" "1860-01-01T06:00:00" "1861-01-01T00:00:00"
 
 echo "🎉 All datasets created successfully!"

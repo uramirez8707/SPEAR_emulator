@@ -10,6 +10,7 @@ config.dump_info()
 training, validating, testing  = get_dataloaders(config)
 input_channels, out_channels = get_updated_channels(config)
 config.set_channels(input_channels, out_channels)
+config.set_grid(training)
 
 L.seed_everything(config.seed, workers=True)
 
@@ -17,7 +18,7 @@ logger = CSVLogger("logs", name="spear_emulator")
 
 SPEAR = SpearEmulator(config)
 trainer = L.Trainer(
-    max_epochs=10,
+    max_epochs=50,
     logger=logger,
     accelerator="auto",
     devices=1,
@@ -27,8 +28,8 @@ trainer = L.Trainer(
 
 trainer.fit(
     model=SPEAR,
-    train_dataloaders=training,
-    val_dataloaders=validating
+    train_dataloaders=training.tensor,
+    val_dataloaders=validating.tensor
 )
 
 print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")

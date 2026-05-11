@@ -4,6 +4,7 @@ import numpy as np
 from anemoi.datasets import open_dataset
 from utils import configSetUp
 from torch.utils.data import Dataset, Subset
+import pandas as pd
 
 class SPEARLaggedDataset(Dataset):
     def __init__(self, anemoi_dataset, dynamic_vars, static_vars, output_vars, nlags=3):
@@ -51,6 +52,14 @@ class SPEARLaggedDataset(Dataset):
         
         return x, y
 
+class SPEARDataStore():
+    def __init__(self, tensor, original_database):
+        self.tensor = tensor
+        testing_dates = original_database.dates
+        self.times =  pd.to_datetime(testing_dates)
+        self.lat = original_database.latitudes
+        self.lon = original_database.longitudes
+
 def get_updated_channels(config):
     nlags = config.data_config.get("method").get("nlags")
     dynamics = config.dynamics
@@ -93,22 +102,16 @@ def get_tensor(config:configSetUp, dataset, mode):
     batch_size = config.batch_size
     split_set = split_data_set(config, dataset)
 
-    # Only shuffle if we are training
-    if mode == "training_shuffle":
-        g = torch.Generator()
-        g.manual_seed(config.seed)
-
-        indices = torch.randperm(len(split_set), generator=g).tolist()
-        final_set = Subset(split_set, indices)
-    else:
-        # Keep validation/testing in chronological order
-        final_set = split_set
+    num_workers = 16
+    if mode == "testing":
+        num_workers = 1
+        batch_size = 1
 
     data_loader = DataLoader(
-        final_set,
+        split_set,
         batch_size=batch_size,
         shuffle=False,
-        num_workers = 16)
+        num_workers = num_workers)
 
     return data_loader
 
@@ -130,21 +133,24 @@ def get_dataloaders(config:configSetUp):
     print(f"Training shape: {training.shape}")
     print(f"Training actual dates: {training.dates[0]} to {training.dates[-1]}\n")
     training_tensor = get_tensor(config, training, "training")
+    training_set = SPEARDataStore(training_tensor, training)
 
     validating = open_dataset(config.validating)
     print(f"Validating shape: {validating.shape}")
     print(f"Validating actual dates: {validating.dates[0]} to {validating.dates[-1]}\n")
     validating_tensor = get_tensor(config, validating, "validating")
+    validating_set = SPEARDataStore(validating_tensor, validating)
 
     testing = open_dataset(config.testing)
     print(f"Testing shape: {testing.shape}")
     print(f"Testing actual dates: {testing.dates[0]} to {testing.dates[-1]}\n")
     testing_tensor = get_tensor(config, testing, "testing")
+    testing_set = SPEARDataStore(testing_tensor, testing)
 
     if list(training.variables) != config.inputs:
         raise RuntimeError(f"Expected inputs and the dataset variables do not match the variables available in the dataset..."
                            f"\n---> Expected inputs: {config.inputs}"
                            f"\n---> Variables available: {list(training.variables)}")
 
-    return training_tensor, validating_tensor, testing_tensor
+    return training_set, validating_set, testing_set
 

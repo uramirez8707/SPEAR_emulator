@@ -16,8 +16,9 @@ class ConfigClass:
 
     def get_list_of_files(self, variable):
         variable_directory = Path(self.in_data_path) / variable
-        return sorted(variable_directory.iterdir())
-    
+        filtered_files = [f for f in variable_directory.iterdir() if "ens_01" in f.name]
+        return sorted(filtered_files)
+
     def set_pressure_thickness(self):
         '''
         Calculates the pressure thickness (dp) for each full pressure level.
@@ -88,8 +89,6 @@ class ConfigClass:
             print(f"[2] Working on remapping the variable {variable}")
             files = self.get_list_of_files(variable)
             for file in files:
-                if not (("1851" in file.name or "1852" in file.name) and "ens_01" in file.name):
-                    continue
                 print(f"--> Working on the file {file}")
                 self.remap_file(file, variable)
 

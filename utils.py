@@ -34,6 +34,10 @@ class configSetUp:
         self.data_config = raw_config['data_config']
 
         self.seed = raw_config['seed']
+        self.use_coordinates = raw_config['use_coordinates']
+
+    def get_nlags(self):
+        return self.data_config["method"].get("nlags", 0)
 
     def set_channels(self, input_channels, output_channels):
         self.input_channels = input_channels
@@ -46,6 +50,69 @@ class configSetUp:
     def set_normalization_info(self, means, stds):
         self.means = means
         self.stds = stds
+
+    def set_grid(self, database):
+        self.lat = database.lat
+        self.lon = database.lon
+
+    def get_grid(self):
+        if self.lat is None or self.lon is None:
+            raise RuntimeError(f"Grid is not set. You need to call self.set_grid() first")
+
+        return self.lat, self.lon
+
+    def find_index(self, var, inputs):
+        return inputs.index(var)
+
+    def get_var_units(self, var):
+        try:
+            units = self.var_config[var]["units"]
+        except KeyError as e:
+            raise KeyError(
+                f"Missing variable or units for '{var}'"
+            ) from e
+
+        if not units:
+            raise ValueError(f"Invalid units for '{var}': {units!r}")
+
+        return units
+
+    def get_target_weight(self, var):
+        try:
+            weight = self.var_config[var]["target_weight"]
+        except KeyError as e:
+            raise KeyError(
+                f"Missing variable or target_weight for '{var}'"
+            ) from e
+
+        if not weight:
+            raise ValueError(f"Invalid target_weight for '{var}': {weight!r}")
+
+        return weight
+
+    def get_mappings(self):
+        targets = self.outputs
+        inputs = self.input_channels
+        nlags = self.get_nlags()
+
+        mappings = []
+        for target in targets:
+            variable_mapping = {
+                "variable_name": target,
+                "labels": []
+            }
+
+            if nlags > 0:
+                for i in range(nlags):
+                    label = f"t-{i+1}"
+                    variable_name = f"{target}({label})"
+                    variable_mapping["labels"].append({
+                        "label": label,
+                        "index": self.find_index(variable_name, inputs)
+                    })
+            mappings.append(variable_mapping)
+
+        return mappings
 
     def split_year(self, string, label):
         years = re.findall(r'\d{4}', string)
