@@ -92,7 +92,7 @@ input_channels, out_channels = get_updated_channels(config)
 config.set_channels(input_channels, out_channels)
 config.set_grid(training)
 
-version = "version_18"
+version = "version_24"
 checkpoint_path = f"logs/spear_emulator/{version}/checkpoints/epoch=49-step=18300.ckpt"
 model = SpearEmulator.load_from_checkpoint(checkpoint_path, config=config)
 

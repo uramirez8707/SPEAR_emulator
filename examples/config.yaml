@@ -17,6 +17,7 @@ data_config:
     nlags: 3
 
 use_coordinates: True
+use_residual: True
 
 variables:
   air_temperature_at_two_meters:

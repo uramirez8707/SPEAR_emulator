@@ -35,6 +35,7 @@ class configSetUp:
 
         self.seed = raw_config['seed']
         self.use_coordinates = raw_config['use_coordinates']
+        self.use_residual = raw_config['use_residual']
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 0)

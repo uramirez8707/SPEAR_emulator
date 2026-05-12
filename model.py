@@ -114,6 +114,7 @@ class SpearEmulator(L.LightningModule):
         self.target_names = config.outputs
         self.setup_area_weights(config)
         self.setup_target_weights(config)
+        self.setup_residual_indices(config)
 
         print(self.model)
         print(f"INPUTS: {config.input_channels}")
@@ -128,12 +129,22 @@ class SpearEmulator(L.LightningModule):
         print(f"Stds used to normalize: {self.y_stds.flatten().tolist()}")
 
     def forward(self, x):
+        # Normalize the targets
         x_norm = self.normalizer(x)
 
+        # Add the cosine/sine of the latitude/longitude as targets
         if self.use_coordinates:
             x_norm = self.return_x_with_coordinates(x_norm)
 
-        return self.model(x_norm)
+        # Run the model.
+        # This is going to give me the actual targets (use_residual=False) or the delta target (use_residual=True)
+        cnn_out =  self.model(x_norm)
+        if self.use_residual:
+            # Get the value of each target at (t-1)
+            t_minus_one = x_norm[:, self.residual_indices, :, :]
+            cnn_out = cnn_out + t_minus_one
+
+        return cnn_out
 
     def set_target_statistics(self, config):
         y_means, y_stds = get_statistics(config, channel_type="output")
@@ -253,3 +264,25 @@ class SpearEmulator(L.LightningModule):
 
         print(f"Coordinates have shape: {coords.shape}")
         return ["sin(lat)", "cos(lat)", "sin(lon)", "cos(lon)"]
+
+    def setup_residual_indices(self, config):
+        self.use_residual = config.use_residual
+        temp_indices = []
+
+        targets = config.outputs
+        inputs = config.input_channels
+        if not self.use_residual:
+            return
+
+        for target in targets:
+            print(f"Finding the index of target {target} in the y tensor")
+            var = f"{target}(t-1)"
+            if var in inputs:
+                idx = inputs.index(var)
+                print(f"Residual mapped: Target '{var}' -> Input Index {idx}")
+                temp_indices.append(idx)
+            else:
+                raise ValueError(f"Could not find {var} in {inputs} for residual connection!")
+
+        indices_tensor = torch.tensor(temp_indices, dtype=torch.long)
+        self.register_buffer("residual_indices", indices_tensor)
