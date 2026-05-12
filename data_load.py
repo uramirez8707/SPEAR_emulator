@@ -85,18 +85,23 @@ def split_data_set(config, dataset):
     if data_type not in ["residual", "default"]:
         raise RuntimeError(f"The type must be 'residual' or 'default', but you specified {data_type}")
 
-    method = config.data_config.get("method").get("name")
-    if method not in ["lags", "autoregressive"]:
-        raise RuntimeError(f"The method name must be 'lags' or 'autoregressive', but you specified {method}")
-
+    method = config.get_data_load_method()
     if method == "lags":
+        nlags = config.get_nlags()
+
+        print(f"Splitting the data into {nlags} lags for time varying variables")
         return SPEARLaggedDataset(
                     anemoi_dataset=dataset, 
                     dynamic_vars=config.dynamics, 
                     static_vars=config.statics,
                     output_vars=config.outputs,
-                    nlags=config.data_config.get("method").get("nlags")
+                    nlags=nlags
                 )
+    elif method == "autoregressive":
+        nsteps = config.get_nregressive_steps()
+        print(f"Using {nsteps} {method} steps during training")
+
+        #TODO
 
 def get_tensor(config:configSetUp, dataset, mode):
     batch_size = config.batch_size

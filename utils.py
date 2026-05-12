@@ -35,10 +35,21 @@ class configSetUp:
 
         self.seed = raw_config['seed']
         self.use_coordinates = raw_config['use_coordinates']
-        self.use_residual = raw_config['use_residual']
+        self.use_residual = self.set_use_residual()
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 0)
+
+    def set_use_residual(self):
+        if self.data_config.get("method") == "residual":
+            return True
+        return False
+
+    def get_data_load_method(self):
+        method = self.data_config["method"].get("name")
+        if method not in ["lags", "autoregressive"]:
+            raise RuntimeError(f"The method name must be 'lags' or 'autoregressive', but you specified {method}")
+        return method
 
     def set_channels(self, input_channels, output_channels):
         self.input_channels = input_channels
