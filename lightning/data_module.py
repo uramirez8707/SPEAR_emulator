@@ -83,7 +83,7 @@ class PredictDataset:
         self.predictions.shape = [n_timesteps, n_features]
         pytorch modules expect [batch, sequence_length, n_features], which is achieved by unsqueeze(0)
         """
-        return self.predictions[-self.sequence_length:].unsqueeze(0)  # shape [1, sequence_length, n_features]
+        return self.predictions[-self.sequence_length:].unsqueeze(0)  
 
     def add(self, value):
         """
