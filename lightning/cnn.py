@@ -4,18 +4,16 @@ import lightning as pl
 from matplotlib import pyplot as plt
 import torch
 
-from model import TrainModule, SimpleCNN
-from data import (
-    AutoDataModule, 
-    TrainingAutoregressiveDataset, 
-    PredictAutoregressiveDataset, 
-    load_variable
-)
+from autolightning import TrainModule, AutoDataModule
+from models import SimpleCNN
+from data_module import load_variable, PredictDataset
 
 cnn = SimpleCNN()
 sequence_length = 3
 
-raw_data, _, _ = load_variable("data/atmos.192101-201012.t_ref.nc", "t_ref")
+data_path = "data/atmos.192101-201012.t_ref.nc"
+data_dict = {"t_ref": data_path}
+raw_data = load_variable(data_dict)["t_ref"]
 
 reload = False
 train = True
@@ -32,7 +30,7 @@ else:
 trainer = pl.Trainer(max_epochs=max_epochs)
 
 if train:
-    data = AutoDataModule(sequence_length=sequence_length, TrainingDatasetClass=TrainingAutoregressiveDataset).prepare(raw_data)
+    data = AutoDataModule(data_dict=data_dict, sequence_length=sequence_length)
     trainer.fit(model=model, datamodule=data)
 
 
@@ -42,8 +40,9 @@ model.model.cpu()
 
 
 #first evaluation
-data = AutoDataModule(sequence_length=sequence_length, train_size=0.999, val_size=0.001, TrainingDatasetClass=TrainingAutoregressiveDataset).prepare(raw_data)
-inputs, targets = next(iter(data.train_dataloader(batch_size=len(data.train_dataset))))
+data = AutoDataModule(data_dict=data_dict, sequence_length=sequence_length, training_size=0.999, val_size=0.001)
+data.setup()
+inputs, targets = next(iter(data.train_dataloader()))
 with torch.no_grad():
     z = model.model(inputs)
 
@@ -57,7 +56,7 @@ ax.legend()
 
 
 #second evaluation
-data = PredictAutoregressiveDataset(raw_data, sequence_length=sequence_length)
+data = PredictDataset(raw_data, sequence_length=sequence_length)
 with torch.no_grad():
     for itime in range(sequence_length, data.ntimes):
         inputs = data.get_inputs()
