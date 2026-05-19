@@ -48,6 +48,7 @@ class SimpleLSTM(torch.nn.Module):
             Normalized tensor with values in [0, 1] along the sequence dimension.
         """
         # x shape: (batch, seq_len, input_size)
+        x = x.clone()
         mins, maxs = [], []
         for ibatch in range(x.shape[0]):
             min_ivar, max_ivar = [], []
@@ -61,26 +62,25 @@ class SimpleLSTM(torch.nn.Module):
             maxs.append(max_ivar)
         return x, mins, maxs
 
-    def denormalize(self, y, mins, maxs, input_size):
+    def denormalize(self, y, mins, maxs):
         """Undo min-max normalization on the output.
 
         Args:
-            y:          Tensor of shape (batch, output_size)
-            mins:       List of per-(batch, variable) minimums from normalize()
-            maxs:       List of per-(batch, variable) maximums from normalize()
-            input_size: Number of input variables (stride for indexing mins/maxs)
+            y:    Tensor of shape (batch, output_size)
+            mins: List of per-(batch, variable) minimums from normalize()
+            maxs: List of per-(batch, variable) maximums from normalize()
 
         Returns:
             Denormalized tensor in the original input scale.
         """
+        y = y.clone()
         for ibatch in range(y.shape[0]):
             for ivar in range(y.shape[1]):
                 y[ibatch, ivar] = y[ibatch, ivar] * (maxs[ibatch][ivar] - mins[ibatch][ivar] + 1e-8) + mins[ibatch][ivar]
         return y
 
     def forward(self, x):
-        input_size = x.shape[2]
         x, mins, maxs = self.normalize(x)
         lstm_out, _ = self.lstm(x)
         output = self.linear(lstm_out[:, -1, :])  # Use the last output of the LSTM
-        return self.denormalize(output, mins, maxs, input_size)
+        return self.denormalize(output, mins, maxs)

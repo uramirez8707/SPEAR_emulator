@@ -132,5 +132,5 @@ def from_reload(model, saved_chkpt_path):
     """Reload a model from a checkpoint path."""
     if not Path(saved_chkpt_path).exists():
         raise ValueError(f"Checkpoint path {saved_chkpt_path} does not exist.")
-    return TrainModule.load_from_checkpoint(saved_chkpt_path, weights_only=False, map_location="cpu")
+    return TrainModule.load_from_checkpoint(saved_chkpt_path, model=model, weights_only=False, map_location="cpu")
 
