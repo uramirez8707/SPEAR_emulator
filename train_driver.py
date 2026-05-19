@@ -3,6 +3,7 @@ from data_load import get_dataloaders, get_updated_channels
 import pytorch_lightning as L
 from utils import configSetUp
 from pytorch_lightning.loggers import CSVLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 import os
 
 def train_model(config, label, working_dir):
@@ -69,8 +70,8 @@ def train_model(config, label, working_dir):
 
 working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/dev"
 
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
-#train_model(config, "autoregressive_nsteps_3", working_dir)
+config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
+train_model(config, "autoregressive_nsteps_3", working_dir)
 
 config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
 train_model(config, "autoregressive_nsteps_3_padding", working_dir)
