@@ -41,11 +41,8 @@ def construct_model(in_channels, out_channels, filters):
 
     for i, f in enumerate(reversed_filters):
         layers.extend([
-            # 1. Mathematically smooth spatial doubling (no learned weights here)
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            # 2. Standard convolution to process the features (stride=1 keeps size the same)
             nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=1),
-            # 3. Normalization and Activation
             nn.BatchNorm2d(f),
             nn.ReLU(inplace=True)
         ])
@@ -55,6 +52,53 @@ def construct_model(in_channels, out_channels, filters):
     layers.append(
         nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=1)
     )
+
+    model = nn.Sequential(*layers)
+
+    return model
+
+def construct_model_better_padding(in_channels, out_channels, filters):
+    layers = []
+
+    # Encoder
+    prev_channel = in_channels
+    for f in filters[:-1]:
+        layers.extend([
+            GlobalGridPad2d(padding=1),
+            nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=0),
+            nn.BatchNorm2d(f),
+            nn.ReLU(),
+        ])
+        prev_channel = f
+
+    # Bottleneck
+    bottleneck_channels = filters[-1]
+    layers.extend([
+        GlobalGridPad2d(padding=1),
+        nn.Conv2d(prev_channel, bottleneck_channels, kernel_size=3, padding=0),
+        nn.BatchNorm2d(bottleneck_channels),
+        nn.ReLU(inplace=True)
+    ])
+
+    # Decoder
+    reversed_filters = list(reversed(filters[:-1]))
+    prev_channel = bottleneck_channels
+
+    for i, f in enumerate(reversed_filters):
+        layers.extend([
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            GlobalGridPad2d(padding=1),
+            nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=0),
+            nn.BatchNorm2d(f),
+            nn.ReLU(inplace=True)
+        ])
+        prev_channel = f
+
+    # Final Output Layer
+    layers.extend([
+        GlobalGridPad2d(padding=1),
+        nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=0)
+    ])
 
     model = nn.Sequential(*layers)
 
@@ -87,6 +131,24 @@ def get_statistics(config, channel_type="input"):
 
     return means_tensor, stds_tensor
 
+class GlobalGridPad2d(nn.Module):
+    """
+    Pads the longitude (width) circularly, 
+    and the latitude (height) by replicating the edge values.
+    """
+    def __init__(self, padding=1):
+        super().__init__()
+        self.p = padding
+
+    def forward(self, x):
+        # F.pad takes boundaries as: (Left, Right, Top, Bottom)
+        # 1. Pad longitude circularly
+        x = F.pad(x, (self.p, self.p, 0, 0), mode='circular')
+
+        # 2. Pad latitude by replicating the poles
+        x = F.pad(x, (0, 0, self.p, self.p), mode='replicate')
+        return x
+
 class NormalizeMe(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -97,7 +159,6 @@ class NormalizeMe(nn.Module):
         self.register_buffer('stds', stds_tensor)
 
     def forward(self, x):
-        # Applies (x - mean) / std instantly across the batch
         return (x - self.means) / self.stds
 
 class SpearEmulator(L.LightningModule):
@@ -279,6 +340,8 @@ class SpearEmulator(L.LightningModule):
         self._logger.info(f"Using {config.model_type} architecture type")
         if config.model_type == "default":
             self.model = construct_model(input_dim, output_dim, filters)
+        elif config.model_type == "cnn-padding":
+            self.model = construct_model_better_padding(input_dim, output_dim, filters)
         else:
             raise RuntimeError(f"{config.model_type} has not been implemented as a model architecture")
 

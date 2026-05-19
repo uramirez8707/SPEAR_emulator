@@ -14,6 +14,13 @@ def train_model(config, label, working_dir):
 
     L.seed_everything(config.seed, workers=True, verbose=False)
 
+    ckpt_dir = f"{working_dir}/output/{label}/checkpoints"
+    last_ckpt_path = os.path.join(ckpt_dir, "last.ckpt")
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=ckpt_dir,
+        save_last=True,
+    )
+
     logger = CSVLogger(f"{working_dir}/output", name="spear_emulator", version=label)
 
     method = config.get_data_load_method()
@@ -25,16 +32,23 @@ def train_model(config, label, working_dir):
     trainer = L.Trainer(
         max_epochs=50,
         logger=logger,
+        callbacks=[checkpoint_callback],
         accelerator="auto",
         devices=1,
         deterministic=True,
         benchmark=False
     )
 
+    resume_ckpt = last_ckpt_path if os.path.exists(last_ckpt_path) else None
+
+    if resume_ckpt:
+        print(f"Resuming training from checkpoint: {resume_ckpt}")
+
     trainer.fit(
         model=SPEAR,
         train_dataloaders=training.tensor,
-        val_dataloaders=validating.tensor
+        val_dataloaders=validating.tensor,
+        ckpt_path=resume_ckpt
     )
 
     print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
@@ -52,7 +66,11 @@ def train_model(config, label, working_dir):
 #print("------------------------------------------")
 #
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run1"
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run0"
+
 config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
-train_model(config, "autoregressive_nsteps_3_upsample", working_dir)
+train_model(config, "autoregressive_nsteps_3", working_dir)
+
+config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
+train_model(config, "autoregressive_nsteps_3_padding", working_dir)
 
