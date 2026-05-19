@@ -4,21 +4,24 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 
-from model import TrainModule, SimpleLSTM
-from data import (
-    AutoDataModule, 
-    PredictLSTMDataset, 
-    TrainingLSTMDataset, 
-    load_variable, 
-    normalize
-)
+import data_module
+from autolightning import AutoDataModule, TrainModule
+from model import SimpleLSTM
 
-#read data
-tref = load_variable("data/atmos.192101-201012.t_ref.nc", "t_ref")[0]
-tref_mean = normalize([datum.mean() for datum in tref])
+# read data
+data_dict = {
+    "t_ref": "data/atmos.192101-201012.t_ref.nc",
+    "swdn_toa": "data/atmos.192101-201012.swdn_toa.nc",
+}
+data = data_module.load_variable(data_dict)
 
-swdn_toa = load_variable("data/atmos.192101-201012.swdn_toa.nc", "swdn_toa")[0]
-swdn_toa_mean = normalize([datum.mean() for datum in swdn_toa])
+tref = data["t_ref"]
+tref_mean = np.array([datum.mean() for datum in tref], dtype=np.float32)
+tref_mean = tref_mean / tref_mean.mean()
+
+swdn_toa = data["swdn_toa"]
+swdn_toa_mean = np.array([datum.mean() for datum in swdn_toa], dtype=np.float32)
+swdn_toa_mean = swdn_toa_mean / swdn_toa_mean.mean()
 
 labels = [(0, 'tref'), (1, 'swdn_toa')]
 inputs = np.column_stack((tref_mean, swdn_toa_mean))
@@ -46,12 +49,12 @@ else:
 if train:
     tb_logger = TensorBoardLogger(save_dir="lstm-2variable-2outputs", name="")
     trainer = pl.Trainer(max_epochs=max_epochs, logger=tb_logger)    
-    datamodule = AutoDataModule(sequence_length=sequence_length, TrainingDatasetClass=TrainingLSTMDataset).prepare(inputs)
+    datamodule = AutoDataModule(data=inputs, sequence_length=sequence_length)
     
     trainer.fit(model=model, datamodule=datamodule)
 
     #plot training plot    
-    inputs_, targets = next(iter(datamodule.train_dataloader(batch_size=datamodule.sizes.train)))
+    inputs_, targets = next(iter(datamodule.train_dataloader()))
     with torch.no_grad():
         z = model.model(inputs_)
     
@@ -63,7 +66,7 @@ if train:
         trainer.logger.experiment.add_figure(f"training_{label}", fig, global_step=trainer.global_step)
     
     #  validation plot
-    inputs_, targets = next(iter(datamodule.val_dataloader(batch_size=datamodule.sizes.val)))
+    inputs_, targets = next(iter(datamodule.val_dataloader()))
     with torch.no_grad():
         z = model.model(inputs_)
     
@@ -78,12 +81,12 @@ if train:
 # evaluate
 model.model.eval()
 model.model.cpu()
-datamodule = PredictLSTMDataset(inputs, sequence_length=sequence_length)
+datamodule = data_module.PredictLSTMDataset(inputs, sequence_length=sequence_length)
 
 with torch.no_grad():
     for itime in range(sequence_length, datamodule.ntimes):
-        inputs = datamodule.get_inputs()
-        z = model.model(inputs)
+        model_inputs = datamodule.get_inputs()
+        z = model.model(model_inputs)
         datamodule.add(z)
         
 for column, label in labels:
@@ -95,7 +98,8 @@ for column, label in labels:
     if train:
         trainer.logger.experiment.add_figure(f"evaluation_{label}", fig, global_step=trainer.global_step)
         trainer.logger.experiment.flush()
-else:
+
+if not train:
     plt.show()
 
 
