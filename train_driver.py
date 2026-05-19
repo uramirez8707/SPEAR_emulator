@@ -3,6 +3,7 @@ from data_load import get_dataloaders, get_updated_channels
 import pytorch_lightning as L
 from utils import configSetUp
 from pytorch_lightning.loggers import CSVLogger
+import os
 
 def train_model(config, label, working_dir):
     config.dump_info()
@@ -30,7 +31,7 @@ def train_model(config, label, working_dir):
         SPEAR = SpearEmulator(config)
 
     trainer = L.Trainer(
-        max_epochs=50,
+        max_epochs=1,
         logger=logger,
         callbacks=[checkpoint_callback],
         accelerator="auto",
@@ -66,10 +67,10 @@ def train_model(config, label, working_dir):
 #print("------------------------------------------")
 #
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run0"
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/dev"
 
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
-train_model(config, "autoregressive_nsteps_3", working_dir)
+#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
+#train_model(config, "autoregressive_nsteps_3", working_dir)
 
 config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
 train_model(config, "autoregressive_nsteps_3_padding", working_dir)
