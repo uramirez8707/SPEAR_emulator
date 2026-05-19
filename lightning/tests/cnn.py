@@ -1,3 +1,4 @@
+"""SKIP ME, NEEDS TO BE MODIFIED"""
 from pathlib import Path
 
 import lightning as pl
