@@ -1,11 +1,21 @@
 from pathlib import Path
 
 import lightning as pl
+from matplotlib import pyplot as plt
 import numpy as np
 import torch
 
 import data_module
 
+class TrainingTimerCallback(pl.Callback):
+    """A Lightning callback to time training epochs."""
+
+    def __init__(self):
+        super().__init__()
+    
+    def on_train_end(self, trainer, _pl_module):
+        epoch_time = trainer._timer._time() - self.epoch_start_time
+        print(f"Epoch {trainer.current_epoch} took {epoch_time:.2f} seconds.")
 
 class TrainModule(pl.LightningModule):
     """A Lightning auto training model."""
@@ -51,6 +61,21 @@ class TrainModule(pl.LightningModule):
     def on_validation_epoch_end(self):
         pass
 
+    def test_step(self, batch, _batch_idx):
+        """Test step"""
+        inputs, targets = batch
+        z = self.model(inputs) #[batch, input_size]
+        
+        input_size = z.shape[1]
+        for ivar in range(input_size):
+            ave_targets = [targets[itime, ivar].detach().cpu().mean() for itime in range(targets.shape[0])]
+            ave_z = [z[itime, ivar].detach().cpu().mean() for itime in range(z.shape[0])]
+            fig, ax = plt.subplots()
+            ax.plot(ave_targets, color='black', label='actual')
+            ax.plot(ave_z, color='pink', label='fitted')
+            ax.legend()
+            self.logger.experiment.add_figure(f"global average of fit for variable #{ivar}", fig, global_step=self.global_step)
+
     def configure_optimizers(self):
         """ set optimizer """
         optimizer = self.optimizer_cls(self.parameters(), lr=self.learning_rate)
@@ -82,18 +107,23 @@ class AutoDataModule(pl.LightningDataModule):
         sequence_length: int = 3,
         training_size: float = 0.6,
         val_size: float = 0.2,
-        batch_size: int = 32
+        batch_size: int = 32,
+        test_with_global_average: bool = False
     ):
         super().__init__()
 
         self.data_dict = data_dict
         self.sequence_length = sequence_length
+        self.test_with_global_average = test_with_global_average
         self.training_size = training_size
         self.val_size = val_size
-        self.batch_size = batch_size
+        self.batch_size = batch_size        
+
+        self.ntimes = None
 
         self.train_dataset = None
         self.val_dataset = None
+        self.test_dataset = None
 
     def prepare_data(self):
         """prepare data"""
@@ -105,20 +135,30 @@ class AutoDataModule(pl.LightningDataModule):
                 raise ValueError(f"input file {inputfile} for variable {variable} does not exist.")
 
     def setup(self, stage: str = None):
-        """setup data"""
+        """setup data"""        
 
         loaded_data = data_module.load_variable(self.data_dict)
-
-        data_array = np.column_stack(list(loaded_data.values()))
-        ntimesteps = data_array.shape[0]
-        train_end = int(ntimesteps * self.training_size)
-        val_end = int(ntimesteps * (self.training_size + self.val_size))
-
-        train_data = data_array[:train_end]
-        val_data = data_array[train_end:val_end]
-
-        self.train_dataset = data_module.TrainingDataset(train_data, sequence_length=self.sequence_length)
-        self.val_dataset = data_module.TrainingDataset(val_data, sequence_length=self.sequence_length)
+        
+        key = list(loaded_data.keys())[0]
+        self.ntimes = loaded_data[key].shape[0]
+        
+        datalist = []
+        if self.test_with_global_average:
+            for itime in range(self.ntimes):
+                datalist.append([loaded_data[variable][itime].mean() for variable in self.data_dict.keys()])
+        else:
+            for itime in range(self.ntimes):
+                datalist.append([loaded_data[variable][itime] for variable in self.data_dict.keys()])
+        
+        data_array = np.array(datalist)
+                
+        if stage == "fit" or stage is None:
+            train_end = int(self.ntimes * self.training_size)
+            val_end = int(self.ntimes * (self.training_size + self.val_size))
+            self.train_dataset = data_module.TrainingDataset(data_array[:train_end], sequence_length=self.sequence_length)
+            self.val_dataset = data_module.TrainingDataset(data_array[train_end:val_end], sequence_length=self.sequence_length)
+        elif stage == "test":
+            self.test_dataset = data_module.TrainingDataset(data_array, sequence_length=self.sequence_length)
 
     def train_dataloader(self):
         """Load training data onto DataLoader"""
@@ -127,6 +167,10 @@ class AutoDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         """Load validation data onto DataLoader"""
         return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False)
+
+    def test_dataloader(self):
+        """Load test data onto DataLoader"""
+        return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.ntimes, shuffle=False)
 
 def from_reload(model, saved_chkpt_path):
     """Reload a model from a checkpoint path."""

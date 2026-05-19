@@ -20,7 +20,7 @@ input_size = len(data_dict)
 sequence_length = 5
 
 learning_rate = 0.001
-max_epochs = 5000
+max_epochs = 1
 
 lstm = SimpleLSTM(input_size=input_size, output_size=input_size)
 
@@ -42,60 +42,22 @@ tb_logger = TensorBoardLogger(save_dir=save_dir, name=name)
 #train
 if train:
     trainer = pl.Trainer(max_epochs=max_epochs, logger=tb_logger)    
-    datamodule = AutoDataModule(data_dict=data_dict, sequence_length=sequence_length)
+    datamodule = AutoDataModule(data_dict=data_dict, sequence_length=sequence_length, test_with_global_average=True)
     
     trainer.fit(model=model, datamodule=datamodule)
+    trainer.test(model=model, datamodule=datamodule)
 
-    #plot training plot    
-    #inputs_, targets = next(iter(datamodule.train_dataloader()))
-    #with torch.no_grad():
-    #    z = model.model(inputs_)
-    
-    #for column, label in labels:
-    #    fig, ax = plt.subplots()
-    #    ax.plot(targets[:, column].detach(), color='black', label=f'actual {label}')
-    #    ax.plot(z[:, column].detach(), label=f'training fit {label}')
-    #    ax.legend()
-    #    trainer.logger.experiment.add_figure(f"training_{label}", fig, global_step=trainer.global_step)
-    
-    #  validation plot
-    #inputs_, targets = next(iter(datamodule.val_dataloader()))
-    #with torch.no_grad():
-    #    z = model.model(inputs_)
-    
-    #for column, label in labels:
-    #    fig, ax = plt.subplots()
-    #    ax.plot(targets[:, column].detach(), color='black', label=f'actual {label}')
-    #    ax.plot(z[:, column].detach(), label=f'validation fit {label}')
-    #    ax.legend()
-    #    trainer.logger.experiment.add_figure(f"validation_{label}", fig, global_step=trainer.global_step)
-    #trainer.logger.experiment.flush()
-
-exit()
 # evaluate
 model.model.eval()
 model.model.cpu()
-loaded = data_module.load_variable(data_dict)
-inputs = np.column_stack(list(loaded.values()))
-datamodule = data_module.PredictDataset(inputs, sequence_length=sequence_length)
+
+predict = data_module.PredictDataset(data_dict, sequence_length=sequence_length, test_with_global_average=True)
 
 with torch.no_grad():
-    for itime in range(sequence_length, datamodule.ntimes):
-        model_inputs = datamodule.get_inputs().unsqueeze(0)
+    for itime in range(sequence_length, predict.ntimes):
+        model_inputs = predict.get_inputs().unsqueeze(0)
         z = model.model(model_inputs)
-        datamodule.add(z.squeeze(0))
-        
-for column, label in labels:
-    fig, ax = plt.subplots()
-    ax.plot(datamodule.data[:, column], color='black', label=f'actual {label}')
-    ax.plot(datamodule.predictions[:, column].detach(), label=f'predicted {label}')
-    ax.set_title(label)
-    ax.legend()
-    if train:
-        trainer.logger.experiment.add_figure(f"evaluation_{label}", fig, global_step=trainer.global_step)
-        trainer.logger.experiment.flush()
-
-if not train:
-    plt.show()
+        predict.add(z.squeeze(0))
+    predict.plot(tb_logger=tb_logger)
 
 
