@@ -1,0 +1,58 @@
+from model import SpearEmulator, AutoregressiveSpearEmulator
+from data_load import get_dataloaders, get_updated_channels
+import pytorch_lightning as L
+from utils import configSetUp
+from pytorch_lightning.loggers import CSVLogger
+
+def train_model(config, label, working_dir):
+    config.dump_info()
+
+    training, validating, testing  = get_dataloaders(config)
+    input_channels, out_channels = get_updated_channels(config)
+    config.set_channels(input_channels, out_channels)
+    config.set_grid(training)
+
+    L.seed_everything(config.seed, workers=True, verbose=False)
+
+    logger = CSVLogger(f"{working_dir}/output", name="spear_emulator", version=label)
+
+    method = config.get_data_load_method()
+    if method == "autoregressive":
+        SPEAR = AutoregressiveSpearEmulator(config)
+    else:
+        SPEAR = SpearEmulator(config)
+
+    trainer = L.Trainer(
+        max_epochs=50,
+        logger=logger,
+        accelerator="auto",
+        devices=1,
+        deterministic=True,
+        benchmark=False
+    )
+
+    trainer.fit(
+        model=SPEAR,
+        train_dataloaders=training.tensor,
+        val_dataloaders=validating.tensor
+    )
+
+    print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
+
+#config = configSetUp(config_yaml="examples/config_default.yaml")
+#train_model(config, "nlag_3")
+#
+#print("------------------------------------------")
+#print("------------------------------------------")
+#
+#config = configSetUp(config_yaml="examples/config_residual.yaml")
+#train_model(config, "residual_nlag_3")
+#
+#print("------------------------------------------")
+#print("------------------------------------------")
+#
+
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run1"
+config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
+train_model(config, "autoregressive_nsteps_3_upsample", working_dir)
+

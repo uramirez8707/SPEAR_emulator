@@ -1,5 +1,6 @@
 import xarray as xr
 from pathlib import Path
+from dask import delayed, compute
 
 data_path = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429"
 
@@ -16,7 +17,7 @@ class ConfigClass:
 
     def get_list_of_files(self, variable):
         variable_directory = Path(self.in_data_path) / variable
-        filtered_files = [f for f in variable_directory.iterdir() if "ens_01" in f.name]
+        filtered_files = [f for f in variable_directory.iterdir() if "ens_0" in f.name]
         return sorted(filtered_files)
 
     def set_pressure_thickness(self):
@@ -53,7 +54,7 @@ class ConfigClass:
         new_var_dir.mkdir(exist_ok=True)
         new_file = new_var_dir / file_name
         if new_file.exists():
-            print("Skipping ... file was already remapped")
+            print(f"Skipping ... {str(new_file)}")
             return
 
         print(f"----> Remapping into {str(new_file)}")
@@ -83,20 +84,29 @@ class ConfigClass:
         ds.close()
         print("----> Done")
 
+    def _process_variable(self, variable):
+        print(f"[2] Working on remapping the variable {variable}")
+
+        files = self.get_list_of_files(variable)
+
+        for file in files:
+            print(f"--> Working on the file {file}")
+            self.remap_file(file, variable)
+
     def remap_3D_variables(self):
         self.set_pressure_thickness()
-        for variable in self.variables:
-            print(f"[2] Working on remapping the variable {variable}")
-            files = self.get_list_of_files(variable)
-            for file in files:
-                print(f"--> Working on the file {file}")
-                self.remap_file(file, variable)
+        tasks = [
+            delayed(self._process_variable)(variable)
+            for variable in self.variables
+        ]
+
+        compute(*tasks, scheduler="threads")
 
 phalf_data_path = f"{data_path}/RAW/phalf.nc"
 junk_directory = f"{data_path}/tmp"
 in_data_path = f"{data_path}/RAW"
 out_data_path = f"{data_path}/COARSE"
-variables = ["air_temperature"]
+variables = ["air_temperature", "eastward_wind", "northward_wind", "specific_humidity"]
 coarse_mapping = (
     [0]*7 +
     [1]*4 +

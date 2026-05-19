@@ -124,8 +124,58 @@ def procress_dynamic_variables(dynamic_variables, in_dir:Path, out_dir:Path):
         out.append(var)
     return out
 
-def procress_coarsed_variables(coarse_variables, in_dir:Path, out_dir:Path):
+def procress_coarsed_variables(coarse_variables, in_dir:Path, out_dir:Path,
+        level_labels):
     out = []
+    frequency = "6h"
+    for variable in coarse_variables:
+        print(f"--> Procressing {variable}")
+        var_dir = in_dir / variable
+        new_var_dir = out_dir / variable
+        new_var_dir.mkdir(parents=True, exist_ok=True)
+
+        concat_block = []
+        for file in sorted(var_dir.iterdir()):
+            if "ens_01" not in str(file):
+                continue
+            new_file = new_var_dir / file.name
+            start_time, end_time = get_start_end_time(file.name)
+
+            concat_block.append({
+                "dates": {
+                    "start": start_time,
+                    "end": end_time,
+                    "frequency": frequency,
+                },
+                "netcdf": {
+                    "path": str(new_file),
+                    "variable": variable,
+                },
+            })
+
+            if new_file.is_file():
+                print(f"Skipping {str(new_file)} has already been created")
+                continue
+
+            print(f"  Updating file: {str(file)}")
+            fix_GFDL_file(file, new_file)
+
+        rename_mapping = {
+                            f"{variable}_{level}": f"{variable}_level{i}"
+                            for i, level in enumerate(pressure_level_label, start=1)
+                         }
+        pipe = {
+                "pipe": [
+                    {
+                        "concat": concat_block
+                    },
+                    {
+                        "rename": rename_mapping
+                    }
+                 ]
+            }
+
+        out.append(pipe)
 
     return out
 
@@ -133,27 +183,27 @@ out_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-
 raw_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/RAW")
 coarse_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/COARSE")
 
+pressure_level_label = [25, 96, 203, 345, 517, 695, 847, 963]
+
 static_variables, dynamic_variables, coarsed_variables = get_variable_list(out_data_dir, coarse_data_dir)
 
 print(f"Coarsed variables {coarsed_variables}")
 print(f"Dynamic variables {dynamic_variables}")
 print(f"Static variables {static_variables}")
 
-#coarsed_config = procress_coarsed_variables(coarsed_variables, raw_data_dir, out_data_dir)
-#print(coarsed_config)
-
+coarsed_config = procress_coarsed_variables(coarsed_variables, coarse_data_dir, out_data_dir, pressure_level_label)
 dynamic_config = procress_dynamic_variables(dynamic_variables, raw_data_dir, out_data_dir)
-#static_config = procress_static_variables(static_variables, raw_data_dir, out_data_dir)
+static_config = procress_static_variables(static_variables, raw_data_dir, out_data_dir)
 
-#out_config = {}
-#out_config['dates'] = {
-#    'start': '1851-01-01T06:00:00',
-#    'end': '1861-01-01T00:00:00',  # Adjust these to match your full dataset span
-#    'frequency': '6h'
-#}
-#
-#out_config['input'] = {}
-#out_config['input']['join'] = dynamic_config + static_config
-#with open('anemoi_recipe.yaml', 'w') as f:
-#    yaml.dump(out_config, f, sort_keys=False, default_flow_style=False)
-#
+out_config = {}
+out_config['dates'] = {
+    'start': '1851-01-01T06:00:00',
+    'end': '1861-01-01T00:00:00',
+    'frequency': '6h'
+}
+
+out_config['input'] = {}
+out_config['input']['join'] = coarsed_config + dynamic_config + static_config
+with open('wut.yaml', 'w') as f:
+    yaml.dump(out_config, f, sort_keys=False, default_flow_style=False)
+

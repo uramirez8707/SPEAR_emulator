@@ -17,9 +17,3 @@ def plot_loss(csv_path, out_path):
     plt.grid(True, linestyle='--', alpha=0.6)
     
     plt.savefig(out_path, dpi=300, bbox_inches='tight')
-
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/LIGHTING/logs/spear_emulator/version_10"
-
-log_file = f"{working_dir}/metrics.csv"
-output_file = f"{working_dir}/training_curve.png"
-plot_loss(log_file, output_file)

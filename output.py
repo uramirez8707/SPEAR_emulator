@@ -7,7 +7,7 @@ import gc
 class OutputData:
     def __init__(self, model_label, predictions, ground_truth,
                  times, lattitudes, nlat, longitudes, nlon,
-                 output_targets):
+                 output_targets, fig_dir):
         self.model_label = model_label
         self.times = times
         self.lattitudes = lattitudes
@@ -17,6 +17,7 @@ class OutputData:
         self.predictions = predictions
         self.ground_truth = ground_truth
         self.output_targets = output_targets
+        self.fig_dir = fig_dir
 
     def find_target_index(self, target):
         for i, output_var in enumerate(self.output_targets):
@@ -29,6 +30,8 @@ class OutputData:
 
         truth_start = self.ground_truth[0].detach().numpy()[:, target_index, :, :].squeeze()
         pred_start = self.predictions[0].detach().numpy()[:, target_index, :, :].squeeze()
+
+        print(f"SHAPES {truth_start.shape} - {pred_start.shape}")
 
         truth_end = self.ground_truth[-1].detach().numpy()[:, target_index, :, :].squeeze()
         pred_end = self.predictions[-1].detach().numpy()[:, target_index, :, :].squeeze()
@@ -74,11 +77,12 @@ class OutputData:
             ax.set_xlabel('Longitude')
             ax.set_ylabel('Latitude')
 
-        plt.savefig(f"figs/spatial_snapshot.{target}.{label}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{self.fig_dir}/spatial_snapshot.{target}.{label}.png", dpi=300, bbox_inches='tight')
 
 class ModelResults:
-    def __init__(self):
+    def __init__(self, fig_dir):
         self.models = []
+        self.fig_dir = fig_dir
 
     def add_model(self, model:OutputData):
         print(f"Adding model {model.model_label}")
@@ -144,7 +148,7 @@ class ModelResults:
 
         ax.grid(axis='y', alpha=0.4)
 
-        filename = f"figs/regional_rmse.{target}.png"
+        filename = f"{self.fig_dir}/regional_rmse.{target}.png"
         plt.savefig(filename, dpi=300)
         plt.close(fig)
 
@@ -218,7 +222,7 @@ class ModelResults:
             del preds, truths, preds_flat, truths_flat, sq_errors
             gc.collect()
 
-        filename = f"figs/temporal_evolution.{target}.png"
+        filename = f"{self.fig_dir}/temporal_evolution.{target}.png"
         plt.savefig(filename, dpi=300)
         plt.close(fig)
 
@@ -277,6 +281,6 @@ class ModelResults:
             del preds, truths, preds_flat, truths_flat
             gc.collect()
 
-        filename = f"figs/scatter_comparison.{target}.png"
+        filename = f"{self.fig_dir}/scatter_comparison.{target}.png"
         plt.savefig(filename, dpi=300)
         plt.close(fig)

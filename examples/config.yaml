@@ -1,4 +1,6 @@
+verbose: True
 seed: 42
+model_type: "default"
 
 paths:
   input_dir: "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/LIGHTING/anemoi_prep"
@@ -11,10 +13,10 @@ hyperparameters:
   learning_rate: 0.0001
 
 data_config:
-  type: "default"     # "default" or "residual"
+  type: "residual"     # "default" or "residual"
   method:
-    name: "lags"      # "lags" or "autoregressive"
-    nlags: 3
+    name: "autoregressive"      # "lags" or "autoregressive"
+    nsteps: 3  #nlags or nsteps
 
 use_coordinates: True
 

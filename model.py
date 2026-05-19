@@ -4,6 +4,15 @@ import torch.nn.functional as F
 import pytorch_lightning as L
 import numpy as np
 import torch.optim as optim
+import logging
+from tabulate import tabulate
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(name)s] %(message)s"
+)
+
+logger = logging.getLogger(__name__)
 
 def construct_model(in_channels, out_channels, filters):
     layers = []
@@ -32,18 +41,17 @@ def construct_model(in_channels, out_channels, filters):
 
     for i, f in enumerate(reversed_filters):
         layers.extend([
-            nn.ConvTranspose2d(
-                prev_channel, f,
-                kernel_size=3,
-                stride=2,
-                padding=1,
-                output_padding=1
-            ),
+            # 1. Mathematically smooth spatial doubling (no learned weights here)
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            # 2. Standard convolution to process the features (stride=1 keeps size the same)
+            nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=1),
+            # 3. Normalization and Activation
             nn.BatchNorm2d(f),
             nn.ReLU(inplace=True)
         ])
         prev_channel = f
 
+    # Final Output Layer
     layers.append(
         nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=1)
     )
@@ -94,10 +102,17 @@ class NormalizeMe(nn.Module):
 
 class SpearEmulator(L.LightningModule):
     def __init__(self, config, filters=(16, 32, 32)):
+        super().__init__()
+
+        self._logger = logger
+        if config.verbose:
+            self._logger.setLevel(logging.DEBUG)
+
+        self._logger.info(f"Initializing {self.__class__.__name__}...")
+
         input_dim = len(config.input_channels)
         output_dim = len(config.output_channels)
 
-        super().__init__()
         self.normalizer = NormalizeMe(config)
 
         self.set_target_statistics(config)
@@ -107,39 +122,46 @@ class SpearEmulator(L.LightningModule):
         other_inputs = self.setup_coordinate_channels(config)
         input_dim += len(other_inputs)
 
-        self.model = construct_model(input_dim, output_dim, filters)
-
         self.learning_rate = config.learning_rate
 
         self.target_names = config.outputs
         self.setup_area_weights(config)
         self.setup_target_weights(config)
-        self.setup_residual_indices(config)
 
-        print(self.model)
-        print(f"INPUTS: {config.input_channels}")
-        print(f"Mean used to normalize: {self.normalizer.means.flatten().tolist()}")
-        print(f"Stds used to normalize: {self.normalizer.stds.flatten().tolist()}")
+        self.setup_model_architecture(config, input_dim, output_dim, filters)
+        self.log_input_channels(config)
 
         if other_inputs is not None:
-            print(f"OTHERE INPUTS: {other_inputs}")
+            self._logger.info("Other input channels:\n    " + "\n    ".join(other_inputs))
 
-        print(f"OUTPUTS: {config.output_channels}")
-        print(f"Mean used to normalize: {self.y_means.flatten().tolist()}")
-        print(f"Stds used to normalize: {self.y_stds.flatten().tolist()}")
+        self.log_output_channels(config)
+
+        self.setup_residual_indices(config)
+
+        self.input_channels = config.input_channels
+        self.output_channels = config.output_channels
+        self.dynamic_channels = config.dynamics
+        self.shapes_logged = False
 
     def forward(self, x):
         # Normalize the targets
+        if not self.shapes_logged:
+            self._logger.debug("Normalizing x")
         x_norm = self.normalizer(x)
 
         # Add the cosine/sine of the latitude/longitude as targets
         if self.use_coordinates:
             x_norm = self.return_x_with_coordinates(x_norm)
+            if not self.shapes_logged:
+                self._logger.debug(f"New shape of x {x_norm.shape}")
 
         # Run the model.
         # This is going to give me the actual targets (use_residual=False) or the delta target (use_residual=True)
         cnn_out =  self.model(x_norm)
         if self.use_residual:
+            if not self.shapes_logged:
+                self._logger.debug(f"Adding x_norm[:, {self.residual_indices}, :, :] to the model prediction")
+
             # Get the value of each target at (t-1)
             t_minus_one = x_norm[:, self.residual_indices, :, :]
             cnn_out = cnn_out + t_minus_one
@@ -163,45 +185,44 @@ class SpearEmulator(L.LightningModule):
 
         return global_mse, per_target_mse
 
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-
+    def do_the_training(self, x, y, label):
         x = x.squeeze(2)
         y = y.squeeze(2)
+
+        if not self.shapes_logged:
+            self._logger.debug(f"Shape of orignal x: {x.shape}")
+            self._logger.debug(f"Shape of orignal y: {y.shape}")
 
         x = x.view(x.size(0), x.size(1), self.nlat, self.nlon)
         y = y.view(y.size(0), y.size(1), self.nlat, self.nlon)
         y_norm = (y - self.y_means) / self.y_stds
 
+        if not self.shapes_logged:
+            self._logger.debug(f"Shape of input x: {x.shape}")
+            self._logger.debug(f"Shape of input y: {y.shape}")
+
         preds = self(x)
+        if not self.shapes_logged:
+            self._logger.debug(f"Shape of predictions: {preds.shape}")
+            self.shapes_logged = True
 
         global_mse, per_target_mse = self.compute_weighted_loss(preds, y_norm)
-        self.log("train_loss", global_mse, prog_bar=True)
+        self.log(f"{label}_loss", global_mse, prog_bar=True)
 
         for i, target in enumerate(self.target_names):
-            self.log(f"train_loss_{target}", per_target_mse[i])
+            self.log(f"{label}_loss_{target}", per_target_mse[i])
 
         return global_mse
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+
+        return self.do_the_training(x, y, "train")
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
 
-        x = x.squeeze(2)
-        y = y.squeeze(2)
-
-        x = x.view(x.size(0), x.size(1), self.nlat, self.nlon)
-        y = y.view(y.size(0), y.size(1), self.nlat, self.nlon)
-        y_norm = (y - self.y_means) / self.y_stds
-
-        preds = self(x)
-
-        global_mse, per_target_mse = self.compute_weighted_loss(preds, y_norm)
-        self.log("val_loss", global_mse, prog_bar=True)
-
-        for i, target in enumerate(self.target_names):
-            self.log(f"val_loss_{target}", per_target_mse[i])
-
-        return global_mse
+        return self.do_the_training(x, y, "val")
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -215,29 +236,67 @@ class SpearEmulator(L.LightningModule):
         return x
 
     def setup_area_weights(self, config):
+        """
+        Compute latitude-based area weighting for loss normalization.
+        - Weights are computed as:
+            w(lat) = cos(lat in radians)
+        - Then normalized:
+              w = w / mean(w)
+        - Final shape:
+              (1, 1, nlat, nlon)
+        """
         lats, lons = config.get_grid()
 
         lats_tensor = torch.tensor(lats, dtype=torch.float32)
         area_weights = torch.cos(torch.deg2rad(lats_tensor))
         area_weights = area_weights / area_weights.mean()
         area_weights = area_weights.view(1, 1, self.nlat, self.nlon)
-        print(f"Area weights have shape: {area_weights.shape}")
+
+        self._logger.debug(f"Calculating the area weights for when calculating the loss \n"
+                       f"    Area weights have a shape {list(area_weights.shape)}")
 
         self.register_buffer("area_weights", area_weights)
 
     def setup_target_weights(self, config):
+        """
+        Get the per target weights for loss calculation.
+        - The target weights are defined in the configuration yaml
+        """
+        self._logger.debug("Getting the per target weights for when calculating the loss")
+
         targets = config.outputs
         weights = []
         for target in targets:
             weights.append(config.get_target_weight(target))
-            print(f"Using a weight of {weights[-1]} for {target}")
+            self._logger.debug(f"Using a weight of {weights[-1]} for {target}")
 
         t_weights_tensor = torch.tensor(weights, dtype=torch.float32)
         t_weights_tensor = t_weights_tensor.view(1, len(weights), 1, 1)
         self.register_buffer("target_weights", t_weights_tensor)
-        print(f"Weights have shape: {t_weights_tensor.shape}")
+        self._logger.debug(f"Weights have shape: {list(t_weights_tensor.shape)}")
+
+    def setup_model_architecture(self, config, input_dim, output_dim, filters):
+        self._logger.info(f"Using {config.model_type} architecture type")
+        if config.model_type == "default":
+            self.model = construct_model(input_dim, output_dim, filters)
+        else:
+            raise RuntimeError(f"{config.model_type} has not been implemented as a model architecture")
+
+        self._logger.info(f"Model architecture \n"
+                      f"{self.model}")
+
+        self._logger.info(f"Hyperparameters: \n"
+                      f"    Batch_size: {config.batch_size} \n"
+                      f"    Learning Rate: {config.learning_rate}"
+                )
 
     def setup_coordinate_channels(self, config):
+        """
+        If use_coordinates is set to True in the configuration file,
+        calculates the cosine and sine of lattiude and longitude
+        and combines them as a tensor so they can be used as
+        extra input channels.
+        """
         self.use_coordinates = config.use_coordinates
         if not config.use_coordinates:
             return []
@@ -262,27 +321,198 @@ class SpearEmulator(L.LightningModule):
         coords = coords.unsqueeze(0)
         self.register_buffer("coordinate_channels", coords)
 
-        print(f"Coordinates have shape: {coords.shape}")
-        return ["sin(lat)", "cos(lat)", "sin(lon)", "cos(lon)"]
+        channels = ["sin(lat)", "cos(lat)", "sin(lon)", "cos(lon)"]
+        self._logger.info(f"Adding additional coordinate input channels: \n"
+                      f"    {channels}")
+
+        self._logger.debug(f"Coordinates channels have the shape: {list(coords.shape)}")
+        return channels
 
     def setup_residual_indices(self, config):
         self.use_residual = config.use_residual
-        temp_indices = []
 
-        targets = config.outputs
-        inputs = config.input_channels
         if not self.use_residual:
+            self._logger.info("Model is predicting the absolute target [y(t)]")
             return
 
+        self._logger.info("Model is predicting the residual target:\n"
+                      "   Δy = y(t) - y(t-1) \n"
+                      "Model is outputting the abosolute target as:\n"
+                      "   y(t) = Δy + y(t-1)")
+        temp_indices = []
+        targets = config.outputs
+        inputs = config.input_channels
         for target in targets:
-            print(f"Finding the index of target {target} in the y tensor")
             var = f"{target}(t-1)"
             if var in inputs:
                 idx = inputs.index(var)
-                print(f"Residual mapped: Target '{var}' -> Input Index {idx}")
+                self._logger.debug(f"The index {idx} of X maps to {var}")
                 temp_indices.append(idx)
             else:
                 raise ValueError(f"Could not find {var} in {inputs} for residual connection!")
 
         indices_tensor = torch.tensor(temp_indices, dtype=torch.long)
         self.register_buffer("residual_indices", indices_tensor)
+
+    def log_input_channels(self, config):
+        channels = config.input_channels
+        means = self.normalizer.means.flatten().tolist()
+        stds = self.normalizer.stds.flatten().tolist()
+
+        rows = [
+            [channel, mean, std]
+            for channel, mean, std in zip(channels, means, stds)
+        ]
+        txt = tabulate(rows, headers=["Variable", "Mean", "Std"], tablefmt="github")
+        self._logger.info(f"Input channels \n"
+                      f"{txt}"
+                )
+
+    def log_output_channels(self, config):
+        channels = config.output_channels
+        means = self.y_means.flatten().tolist()
+        stds = self.y_stds.flatten().tolist()
+
+        rows = [
+            [channel, mean, std]
+            for channel, mean, std in zip(channels, means, stds)
+        ]
+
+        txt = tabulate(
+            rows,
+            headers=["Variable", "Mean", "Std"],
+            tablefmt="github"
+        )
+
+        self._logger.info(
+            f"Output channels\n{txt}"
+        )
+
+
+class AutoregressiveSpearEmulator(SpearEmulator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def training_step(self, batch, batch_idx):
+        x, y_sequence = batch
+        if not self.shapes_logged:
+            self._logger.debug(f"Shape of orignal x: {x.shape}")
+            self._logger.debug(f"Shape of orignal y: {y_sequence.shape}")
+
+        nsteps = y_sequence.shape[1]
+
+        total_global_mse, total_per_target_mse = self.get_loss(x, y_sequence, nsteps)
+
+        # Get the average across nsteps to log
+        avg_global_mse = total_global_mse / nsteps
+        avg_per_target_mse = total_per_target_mse / nsteps
+        self.log("train_loss", avg_global_mse, prog_bar=True, sync_dist=True)
+        for i, target in enumerate(self.target_names):
+            self.log(f"train_loss_{target}", avg_per_target_mse[i], sync_dist=True)
+
+        return avg_global_mse
+
+    def validation_step(self,  batch, batch_idx):
+        x, y_sequence = batch
+        nsteps = y_sequence.shape[1]
+
+        total_global_mse, total_per_target_mse = self.get_loss(x, y_sequence, nsteps)
+
+        # Get the average across nsteps to log
+        avg_global_mse = total_global_mse / nsteps
+        avg_per_target_mse = total_per_target_mse / nsteps
+        self.log("val_loss", avg_global_mse, prog_bar=True, sync_dist=True)
+        for i, target in enumerate(self.target_names):
+            self.log(f"val_loss_{target}", avg_per_target_mse[i], sync_dist=True)
+
+        return avg_global_mse
+
+    def get_loss(self, x, y_sequence, nsteps):
+        x = x.squeeze(2)
+        x = x.view(x.size(0), x.size(1), self.nlat, self.nlon)
+        if not self.shapes_logged:
+            self._logger.debug(f"Shape of reshaped x: {x.shape}")
+            self._logger.debug(f"Shape of y_sequence: {y_sequence.shape}")
+
+        current_x = x
+
+        total_global_mse = 0.0
+        total_per_target_mse = None
+
+        for step in range(nsteps):
+            # Prepare the ground truth
+            y_step_all = y_sequence[:, step, ...]
+            if not self.shapes_logged:
+                 self._logger.debug(f"step: {step} - shape of y_all: {y_step_all.shape}")
+
+            y_step_all = y_step_all.squeeze(2)
+            y_step_all = y_step_all.view(y_step_all.size(0), y_step_all.size(1), self.nlat, self.nlon)
+
+            if not self.shapes_logged:
+                 self._logger.debug(f"step: {step} - shape of reshape y_all: {y_step_all.shape}")
+
+            # y_step_all contains all of the outputs + dynamic variables, so just get the outputs
+            # to compare with the preidiction
+            y_step_target = y_step_all[:, 0:len(self.output_channels), ...]
+            if not self.shapes_logged:
+                 self._logger.debug(f"step: {step} - shape of target y: {y_step_target.shape}")
+
+            y_norm = (y_step_target - self.y_means) / self.y_stds
+
+            # Make the prediction
+            preds_norm = self(current_x)
+            if not self.shapes_logged:
+                 self._logger.debug(f"step: {step} - shape of prediction: {preds_norm.shape}")
+
+            # Compute the loss
+            step_global_mse, step_per_target_mse = self.compute_weighted_loss(preds_norm, y_norm)
+            total_global_mse += step_global_mse
+            if total_per_target_mse is None:
+                total_per_target_mse = step_per_target_mse.clone()
+            else:
+                total_per_target_mse += step_per_target_mse
+
+            if step == nsteps - 1:
+                break
+
+            # Convert the predicitions back to physical units:
+            preds = (preds_norm * self.y_stds) + self.y_means
+
+            # Prepare x for the next time step
+            # Update the outputs with the predictions
+            next_x = current_x.clone()
+            if not self.shapes_logged:
+                self._logger.debug(f"{next_x[:, 0:len(self.input_channels), 0, 0]}")
+
+            for i, output in enumerate(self.output_channels):
+              if not self.shapes_logged:
+                 self._logger.debug(f"{output} - {self.input_channels}")
+
+              idx_in_x = self.find_input_channel_index(output)
+              if not self.shapes_logged:
+                 self._logger.debug(f"step: {step} - replacing {output} "
+                                    f"next_x[:, {idx_in_x}, ...] = preds[:, {i}, ...]")
+
+              next_x[:, idx_in_x, ...] = preds[:, i, ...]
+
+            # Update the other dynamic variables with the next actual values
+            for i, dyn_var in enumerate(self.dynamic_channels):
+                # Skip variables that we just predicted!
+                if any(dyn_var in output for output in self.output_channels):
+                    continue
+                idx_in_x = self.find_input_channel_index(dyn_var)
+                if not self.shapes_logged:
+                    self._logger.debug(f"step: {step} - replacing {dyn_var} "
+                                       f"next_x[:, {idx_in_x}, ...] = y_step_all[:, {i}, ...]")
+                next_x[:, idx_in_x, ...] = y_step_all[:, i, ...]
+            current_x = next_x
+
+        self.shapes_logged = True
+        return total_global_mse, total_per_target_mse
+
+    def find_input_channel_index(self, target):
+        var_name = target.replace("(t)", "")
+        for i, input_var in enumerate(self.input_channels):
+            if var_name in input_var:
+                return i
+

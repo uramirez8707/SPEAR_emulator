@@ -1,6 +1,15 @@
 import re
 import yaml
 
+def log_dataset_info(logger, label, dataset):
+    logger.debug(f"{label} shape: \n"
+                 f"    ntimes: {dataset.shape[0]} \n"
+                 f"    nvariables: {dataset.shape[1]} \n"
+                 f"    nesembles: {dataset.shape[2]} \n"
+                 f"    ngridpoints: {dataset.shape[3]}")
+    logger.info(f"{label} time period:\n"
+                f"    {dataset.dates[0]} to {dataset.dates[-1]}")
+
 class configSetUp:
     def __init__(self, config_yaml):
 
@@ -13,21 +22,20 @@ class configSetUp:
         self.validating = f"{self.input_dir}/{path['validating']}"
         self.testing = f"{self.input_dir}/{path['testing']}"
 
-        var_config = raw_config['variables']
+        self.set_variable_config(raw_config['variables'])
         self.inputs = [
-            var for var, info in var_config.items() if info.get('is_input')
+            var for var, info in self.var_config.items() if info.get('is_input')
         ]
         self.outputs = [
-            var for var, info in var_config.items() if info.get('is_output')
+            var for var, info in self.var_config.items() if info.get('is_output')
         ]
         self.statics = [
-            var for var, info in var_config.items() if info.get('is_static') and info.get('is_input')
+            var for var, info in self.var_config.items() if info.get('is_static') and info.get('is_input')
         ]
         self.dynamics = [
-            var for var, info in var_config.items() if not info.get('is_static') and info.get('is_input')
+            var for var, info in self.var_config.items() if not info.get('is_static') and info.get('is_input')
         ]
 
-        self.var_config = var_config
         hyperparameters = raw_config['hyperparameters']
         self.batch_size = hyperparameters['batch_size']
         self.learning_rate = hyperparameters['learning_rate']
@@ -36,14 +44,33 @@ class configSetUp:
         self.seed = raw_config['seed']
         self.use_coordinates = raw_config['use_coordinates']
         self.use_residual = self.set_use_residual()
+        self.verbose = raw_config['verbose']
+        self.model_type = raw_config['model_type']
 
     def get_nlags(self):
-        return self.data_config["method"].get("nlags", 0)
+        return self.data_config["method"].get("nlags", 1)
+
+    def set_variable_config(self, var_config):
+        out_config = {}
+        for var, info in var_config.items():
+            vertical_levels = info.get('vertical_levels')
+            if vertical_levels is None:
+                out_config[var] = info
+                continue
+            for level in vertical_levels:
+                new_var = f"{var}_{level}"
+                new_info = info.copy()
+                new_info.pop("vertical_levels", None)
+                out_config[new_var] = new_info
+        self.var_config = out_config
 
     def set_use_residual(self):
-        if self.data_config.get("method") == "residual":
+        if self.data_config.get("type") == "residual":
             return True
         return False
+
+    def get_nregressive_steps(self):
+        return self.data_config["method"].get("nsteps", 0)
 
     def get_data_load_method(self):
         method = self.data_config["method"].get("name")
