@@ -4,14 +4,26 @@ import xarray as xr
 
 #example:  data_dict = {"t_ref": "data/atmos.192101-201012.t_ref.nc"}
 
-def load_variable(data_dict: dict) -> dict[str, np.ndarray]:
+def load_data(data_dict: dict, test_with_global_average: bool = False) -> dict[str, np.ndarray]:
     """Open NetCDF files and return a mapping of variable names to arrays."""
     
     data = {}
     for variable, datafile in data_dict.items():
         with xr.open_dataset(datafile, decode_timedelta=True) as ds:
             data[variable] = ds[variable].values
-    return data
+        
+    key = list(data.keys())[0]
+    ntimes = data[key].shape[0]
+        
+    datalist = []
+    if test_with_global_average:
+        for itime in range(ntimes):
+            datalist.append([data[variable][itime].mean() for variable in data.keys()])
+    else:
+        for itime in range(ntimes):
+            datalist.append([data[variable][itime] for variable in data.keys()])
+    
+    return np.array(datalist), ntimes
     
 class TrainingDataset(torch.utils.data.Dataset):
     """A PyTorch Dataset for NetCDF data."""
@@ -60,35 +72,27 @@ class PredictDataset:
         self.test_with_global_average = test_with_global_average
 
         self.data_dict = data_dict
-        self.data = None
-        self.ntimes = None
-        self.time = None
-
-        loaded_data = load_variable(self.data_dict)
-        
-        key = list(loaded_data.keys())[0]
-        self.ntimes = loaded_data[key].shape[0]
-        
-        datalist = []
-        if self.test_with_global_average:
-            for itime in range(self.ntimes):
-                datalist.append([loaded_data[variable][itime].mean() for variable in self.data_dict.keys()])
-        else:
-            for itime in range(self.ntimes):
-                datalist.append([loaded_data[variable][itime] for variable in self.data_dict.keys()])
-        
-        self.data = np.array(datalist)
+        self.data, self.ntimes = load_data(self.data_dict, self.test_with_global_average)
 
         # initial predictions as the first sequence_length
         self.predictions = torch.tensor(self.data[:self.sequence_length], dtype=torch.float32)
 
     def get_inputs(self):
-        """Returns the last sequence_length predictions as input."""
-        return self.predictions[-self.sequence_length:]
+        """
+        Returns the last sequence_length predictions as input.
+        self.predictions.shape = [n_timesteps, n_features]
+        pytorch modules expect [batch, sequence_length, n_features], which is achieved by unsqueeze(0)
+        """
+        return self.predictions[-self.sequence_length:].unsqueeze(0)  # shape [1, sequence_length, n_features]
 
     def add(self, value):
-        """Adds a new prediction to the dataset."""
-        self.predictions = torch.cat((self.predictions, value.detach().unsqueeze(0)), dim=0)
+        """
+        Adds a new prediction to the dataset.
+        value.shape = [batch, n_features]
+        self.predictions.shape = [n_timesteps, n_features]
+        """
+        print(self.predictions.shape, value.shape)
+        self.predictions = torch.cat((self.predictions, value.detach()), dim=0)
     
     def plot(self, tb_logger=None):
         """Plot the predictions."""

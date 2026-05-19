@@ -13,22 +13,25 @@ data_dict = {
     "t_ref": "~/spear-emulator-data/atmos.192101-201012.t_ref.nc",
     "swdn_toa": "~/spear-emulator-data/atmos.192101-201012.swdn_toa.nc",
 }
-labels = [(0, "t_ref"), (1, "swdn_toa")]
 
 #lstm parameters
 input_size = len(data_dict)
 sequence_length = 5
 
+#training parameters
 learning_rate = 0.001
-max_epochs = 1
+max_epochs = 5
 
-lstm = SimpleLSTM(input_size=input_size, output_size=input_size)
-
+#control
 reload_ = False
-train = True
+train = False
+predict = True
 save_dir = "lstm-2variable-2outputs"
 name = ""
 saved_chkpt_path = "/home/Mikyung.Lee/spear-emulator-me/lstm-2variable-2outputs/version_0/checkpoints/epoch=4999-step=55000.ckpt"
+
+#NN model
+lstm = SimpleLSTM(input_size=input_size, output_size=input_size)
 
 #initialize model
 if reload_:
@@ -47,17 +50,16 @@ if train:
     trainer.fit(model=model, datamodule=datamodule)
     trainer.test(model=model, datamodule=datamodule)
 
-# evaluate
-model.model.eval()
-model.model.cpu()
-
-predict = data_module.PredictDataset(data_dict, sequence_length=sequence_length, test_with_global_average=True)
-
-with torch.no_grad():
-    for itime in range(sequence_length, predict.ntimes):
-        model_inputs = predict.get_inputs().unsqueeze(0)
-        z = model.model(model_inputs)
-        predict.add(z.squeeze(0))
-    predict.plot(tb_logger=tb_logger)
+# predict:
+if predict:
+    model.model.eval()
+    model.model.cpu()
+    predict = data_module.PredictDataset(data_dict, sequence_length=sequence_length, test_with_global_average=True)
+    with torch.no_grad():
+        for itime in range(sequence_length, predict.ntimes):
+            inputs = predict.get_inputs()
+            z = model.model(inputs)
+            predict.add(z)
+        predict.plot(tb_logger=tb_logger)
 
 

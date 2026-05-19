@@ -12,35 +12,39 @@ class TrainingTimerCallback(pl.Callback):
 
     def __init__(self):
         super().__init__()
-    
-    def on_train_end(self, trainer, _pl_module):
-        epoch_time = trainer._timer._time() - self.epoch_start_time
-        print(f"Epoch {trainer.current_epoch} took {epoch_time:.2f} seconds.")
+        
 
 class TrainModule(pl.LightningModule):
     """A Lightning auto training model."""
 
-    def __init__(self, 
-                model, 
-                loss_functional=torch.nn.functional.mse_loss,
-                optimizer_cls=torch.optim.Adam,
-                use_optim_scheduler=False,
-                learning_rate=1e-3,                
-                lr_factor=0.5, 
-                lr_patience=10):
+    def __init__(
+        self, 
+        model,                 
+        loss_functional=torch.nn.functional.mse_loss,
+        optimizer_cls=torch.optim.Adam,
+        use_optim_scheduler=False,
+        learning_rate=1e-3,                
+        lr_factor=0.5, 
+        lr_patience=10
+    ):
         """Constructor"""
         super().__init__()
-        #self.save_hyperparameters()
         self.model = model
         self.loss_functional = loss_functional
         self.optimizer_cls = optimizer_cls
         self.learning_rate = learning_rate
+        # optimizer scheduler parameters
         self.use_optim_scheduler = use_optim_scheduler
         self.lr_factor = lr_factor
         self.lr_patience = lr_patience
 
     def training_step(self, batch, _batch_idx):
-        """The training step"""
+        """
+        The training step
+        inputs.shape = [batch, sequence_length, n_features]
+        targets.shape = [batch, n_features]
+        z.shape = [batch, n_features]
+        """
         inputs, targets = batch
         z = self.model(inputs)
         loss = self.loss_functional(z, targets)
@@ -48,28 +52,41 @@ class TrainModule(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
+        """Called after training_step."""
         pass
 
     def validation_step(self, batch, _batch_idx):
-        """Validation step"""
-        inputs, targets = batch
-        z = self.model(inputs)
+        """
+        Validation step
+        inputs.shape = [batch, sequence_length, n_features]
+        targets.shape = [batch, n_features]
+        z.shape = [batch, n_features]
+        """
+        inputs, targets = batch 
+        z = self.model(inputs) 
         loss = self.loss_functional(z, targets)
         self.log("val_loss", loss)
         return loss
 
     def on_validation_epoch_end(self):
+        """Called after validation_step."""
         pass
 
     def test_step(self, batch, _batch_idx):
-        """Test step"""
-        inputs, targets = batch
-        z = self.model(inputs) #[batch, input_size]
+        """
+        Test (not predict) step
+        inputs.shape = [batch, sequence_length, n_features]
+        targets.shape = [batch, n_features]
+        z.shape = [batch, n_features]
+        """
+        inputs, targets = batch 
+        z = self.model(inputs) 
         
-        input_size = z.shape[1]
-        for ivar in range(input_size):
+        for ivar in range(z.shape[1]):            
+            # get global averages
             ave_targets = [targets[itime, ivar].detach().cpu().mean() for itime in range(targets.shape[0])]
             ave_z = [z[itime, ivar].detach().cpu().mean() for itime in range(z.shape[0])]
+            # plot
             fig, ax = plt.subplots()
             ax.plot(ave_targets, color='black', label='actual')
             ax.plot(ave_z, color='pink', label='fitted')
@@ -103,7 +120,7 @@ class AutoDataModule(pl.LightningDataModule):
     """Data module for LSTM training on 1D global-mean time series."""
 
     def __init__(self, 
-        data_dict: dict | None = None,
+        data_dict: dict = None,
         sequence_length: int = 3,
         training_size: float = 0.6,
         val_size: float = 0.2,
@@ -137,26 +154,14 @@ class AutoDataModule(pl.LightningDataModule):
     def setup(self, stage: str = None):
         """setup data"""        
 
-        loaded_data = data_module.load_variable(self.data_dict)
-        
-        key = list(loaded_data.keys())[0]
-        self.ntimes = loaded_data[key].shape[0]
-        
-        datalist = []
-        if self.test_with_global_average:
-            for itime in range(self.ntimes):
-                datalist.append([loaded_data[variable][itime].mean() for variable in self.data_dict.keys()])
-        else:
-            for itime in range(self.ntimes):
-                datalist.append([loaded_data[variable][itime] for variable in self.data_dict.keys()])
-        
-        data_array = np.array(datalist)
+        data_array, self.ntimes = data_module.load_data(self.data_dict, self.test_with_global_average)
                 
         if stage == "fit" or stage is None:
             train_end = int(self.ntimes * self.training_size)
             val_end = int(self.ntimes * (self.training_size + self.val_size))
             self.train_dataset = data_module.TrainingDataset(data_array[:train_end], sequence_length=self.sequence_length)
             self.val_dataset = data_module.TrainingDataset(data_array[train_end:val_end], sequence_length=self.sequence_length)
+        
         elif stage == "test":
             self.test_dataset = data_module.TrainingDataset(data_array, sequence_length=self.sequence_length)
 
