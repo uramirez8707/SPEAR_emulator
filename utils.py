@@ -46,6 +46,8 @@ class configSetUp:
         self.use_residual = self.set_use_residual()
         self.verbose = raw_config['verbose']
         self.model_type = raw_config['model_type']
+        if "sfno" in raw_config:
+            self.sfno = raw_config['sfno']
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)

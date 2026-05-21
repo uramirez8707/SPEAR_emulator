@@ -6,6 +6,7 @@ import numpy as np
 import torch.optim as optim
 import logging
 from tabulate import tabulate
+from modulus.models.sfno.sfno import SphericalFourierNeuralOperatorNet
 
 logging.basicConfig(
     level=logging.INFO,
@@ -103,6 +104,19 @@ def construct_model_better_padding(in_channels, out_channels, filters):
     model = nn.Sequential(*layers)
 
     return model
+
+def construct_sfno_model(config, in_channels, out_channels):
+    logger.info("Constructing the snfo architecture")
+    logger.info(f"--> emded_dim: {config.sfno['emded_dim']}")
+    logger.info(f"--> num_layers: {config.sfno['num_layers']}")
+    return SphericalFourierNeuralOperatorNet(
+         in_chans=in_channels,
+         out_chans=out_channels,
+         spectral_transform="sht",
+         embed_dim=config.sfno['emded_dim'],
+         num_layers=config.sfno['num_layers'],
+         grid_size=(config.nlat, config.nlon)
+     )
 
 def get_statistics(config, channel_type="input"):
     expanded_means = []
@@ -342,6 +356,8 @@ class SpearEmulator(L.LightningModule):
             self.model = construct_model(input_dim, output_dim, filters)
         elif config.model_type == "cnn-padding":
             self.model = construct_model_better_padding(input_dim, output_dim, filters)
+        elif config.model_type == "sfno":
+            self.model = construct_sfno_model(config, input_dim, output_dim)
         else:
             raise RuntimeError(f"{config.model_type} has not been implemented as a model architecture")
 
