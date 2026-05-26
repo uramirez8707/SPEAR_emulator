@@ -16,7 +16,7 @@ sequence_length = 3
 
 # training parameters
 learning_rate = 0.001
-max_epochs = 5
+max_epochs = 5000
 
 # control
 reload_ = False
@@ -27,7 +27,7 @@ name = ""
 saved_chkpt_path = ""
 
 # NN model
-cnn = cnn_module.SimpleCNN(in_channels=sequence_length*2)
+cnn = cnn_module.SimpleCNN(nfeatures=len(data_dict), sequence_length=sequence_length)
 
 # initialize model
 if reload_:

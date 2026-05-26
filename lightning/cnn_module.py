@@ -93,24 +93,43 @@ class PredictDataset:
 class SimpleCNN(torch.nn.Module):
     """A simple CNN model with one convolutional layer."""
 
-    def __init__(self, in_channels: int = 3):
-        super().__init__()        
+    def __init__(self, sequence_length: int = 3, nfeatures: int = 2):
+        super().__init__()      
+        self.nfeatures = nfeatures
+        self.sequence_length = sequence_length
         self.cnn1 = torch.nn.Conv2d(
-            in_channels=in_channels,
-            out_channels=2*in_channels,
+            in_channels=nfeatures*sequence_length,
+            out_channels=2*nfeatures*sequence_length,
             kernel_size=3,
             padding=1
         )
         self.relu = torch.nn.ReLU()
         self.cnn2 = torch.nn.Conv2d(
-            in_channels=2*in_channels,
+            in_channels=2*nfeatures*sequence_length,
             out_channels=2,
             kernel_size=3,
             padding=1
         )
 
+    def normalize(self, x):
+        """Normalize the input tensor."""
+        sl = self.sequence_length
+        for ivar in range(self.nfeatures):
+            mean = x[ivar*sl:(ivar+1)*sl].mean()
+            std = x[ivar*sl:(ivar+1)*sl].std().clamp_min(1e-6)
+            x[ivar*sl:(ivar+1)*sl] = (x[ivar*sl:(ivar+1)*sl] - mean) / std
+
+        return x, mean, std
+
+    def denormalize(self, x, means, stds):
+        """Denormalize the input tensor."""
+        return x * stds + means
+
     def forward(self, x):
+        """Forward pass of the CNN."""        
+        y, means, stds = self.normalize(x)        
 
         y = self.relu(self.cnn1(x))
         y = self.cnn2(y)
-        return y
+        
+        return self.denormalize(y, means, stds)

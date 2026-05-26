@@ -12,6 +12,7 @@ def set_trainingdataset(training_dataset):
     global TrainingDataset
     TrainingDataset = training_dataset
 
+
 class TrainingTimerCallback(pl.Callback):
     """A Lightning callback to time training epochs."""
 
