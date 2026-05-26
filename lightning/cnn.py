@@ -22,7 +22,7 @@ max_epochs = 5000
 reload_ = False
 train = True
 predict = True
-save_dir = "cnn-1variable-1output"
+save_dir = "cnn-2variable-2output"
 name = ""
 saved_chkpt_path = ""
 

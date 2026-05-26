@@ -62,11 +62,11 @@ class PredictDataset:
 
     def get_inputs(self):
         """
-        Returns the last sequence_length predictions as input.
+        Returns the last sequence_length predictions as input with batch size of 1
         """
         return torch.cat(
             [self.predictions[-self.sequence_length:, ivar] for ivar in range(self.nfeatures)]
-        )
+        ).unsqueeze(0)
     
     def add(self, value):
         """
@@ -74,7 +74,7 @@ class PredictDataset:
         value.shape = [batch, n_features]
         self.predictions.shape = [n_timesteps, n_features]
         """
-        self.predictions = torch.cat([self.predictions, value.detach().unsqueeze(0)])
+        self.predictions = torch.cat([self.predictions, value.detach()])
     
     def plot(self, tb_logger=None):
         """Plot the predictions."""
@@ -113,23 +113,23 @@ class SimpleCNN(torch.nn.Module):
 
     def normalize(self, x):
         """Normalize the input tensor."""
-        sl = self.sequence_length
+        x_view = x.view(x.shape[0], self.nfeatures, self.sequence_length, x.shape[2], x.shape[3])
+        means = []
         for ivar in range(self.nfeatures):
-            mean = x[ivar*sl:(ivar+1)*sl].mean()
-            std = x[ivar*sl:(ivar+1)*sl].std().clamp_min(1e-6)
-            x[ivar*sl:(ivar+1)*sl] = (x[ivar*sl:(ivar+1)*sl] - mean) / std
+            mean = x_view[:, ivar, :, :, :].mean()
+            x_view[:, ivar, :, :, :] = x_view[:, ivar, :, :, :] / mean
+            means.append(mean)
+        return x, means #, std
 
-        return x, mean, std
-
-    def denormalize(self, x, means, stds):
+    def denormalize(self, x, means):
         """Denormalize the input tensor."""
-        return x * stds + means
+        return x * means
 
     def forward(self, x):
         """Forward pass of the CNN."""        
-        y, means, stds = self.normalize(x)        
+        y, means = self.normalize(x) 
 
-        y = self.relu(self.cnn1(x))
+        y = self.relu(self.cnn1(y))
         y = self.cnn2(y)
-        
-        return self.denormalize(y, means, stds)
+                
+        return self.denormalize(y, means)
