@@ -2,10 +2,15 @@ from pathlib import Path
 
 import lightning as pl
 from matplotlib import pyplot as plt
-import numpy as np
 import torch
+import util
 
-import data_module
+TrainingDataset = None
+
+def set_trainingdataset(training_dataset):
+    """Set the training dataset class to be used in AutoDataModule."""
+    global TrainingDataset
+    TrainingDataset = training_dataset
 
 class TrainingTimerCallback(pl.Callback):
     """A Lightning callback to time training epochs."""
@@ -154,16 +159,19 @@ class AutoDataModule(pl.LightningDataModule):
     def setup(self, stage: str = None):
         """setup data"""        
 
-        data_array, self.ntimes = data_module.load_data(self.data_dict, self.test_with_global_average)
+        if TrainingDataset is None:
+            raise ValueError("Set training dataset with set_trainingdataset before calling setup.")
+
+        data_array, self.ntimes = util.load_data(self.data_dict, self.test_with_global_average)
                 
         if stage == "fit" or stage is None:
             train_end = int(self.ntimes * self.training_size)
             val_end = int(self.ntimes * (self.training_size + self.val_size))
-            self.train_dataset = data_module.TrainingDataset(data_array[:train_end], sequence_length=self.sequence_length)
-            self.val_dataset = data_module.TrainingDataset(data_array[train_end:val_end], sequence_length=self.sequence_length)
+            self.train_dataset = TrainingDataset(data_array[:train_end], sequence_length=self.sequence_length)
+            self.val_dataset = TrainingDataset(data_array[train_end:val_end], sequence_length=self.sequence_length)
         
         elif stage == "test":
-            self.test_dataset = data_module.TrainingDataset(data_array, sequence_length=self.sequence_length)
+            self.test_dataset = TrainingDataset(data_array, sequence_length=self.sequence_length)
 
     def train_dataloader(self):
         """Load training data onto DataLoader"""

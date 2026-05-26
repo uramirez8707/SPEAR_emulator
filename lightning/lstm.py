@@ -1,12 +1,10 @@
 import lightning as pl
 from lightning.pytorch.loggers import TensorBoardLogger
-from matplotlib import pyplot as plt
-import numpy as np
 import torch
 
-import data_module
-from autolightning import AutoDataModule, TrainModule, from_reload
-from models import SimpleLSTM
+import lstm1d_module 
+from autolightning import AutoDataModule, TrainModule, from_reload, set_trainingdataset
+
 
 # read data
 data_dict = {
@@ -24,14 +22,14 @@ max_epochs = 5
 
 #control
 reload_ = False
-train = False
+train = True
 predict = True
 save_dir = "lstm-2variable-2outputs"
 name = ""
 saved_chkpt_path = "/home/Mikyung.Lee/spear-emulator-me/lstm-2variable-2outputs/version_0/checkpoints/epoch=4999-step=55000.ckpt"
 
 #NN model
-lstm = SimpleLSTM(input_size=input_size, output_size=input_size)
+lstm = lstm1d_module.SimpleLSTM(input_size=input_size, output_size=input_size)
 
 #initialize model
 if reload_:
@@ -44,6 +42,7 @@ tb_logger = TensorBoardLogger(save_dir=save_dir, name=name)
 
 #train
 if train:
+    set_trainingdataset(lstm1d_module.TrainingDataset)
     trainer = pl.Trainer(max_epochs=max_epochs, logger=tb_logger)    
     datamodule = AutoDataModule(data_dict=data_dict, sequence_length=sequence_length, test_with_global_average=True)
     
@@ -54,12 +53,12 @@ if train:
 if predict:
     model.model.eval()
     model.model.cpu()
-    predict = data_module.PredictDataset(data_dict, sequence_length=sequence_length, test_with_global_average=True)
+    predictor = lstm1d_module.PredictDataset(data_dict, sequence_length=sequence_length, test_with_global_average=True)
     with torch.no_grad():
-        for itime in range(sequence_length, predict.ntimes):
-            inputs = predict.get_inputs()
+        for itime in range(sequence_length, predictor.ntimes):
+            inputs = predictor.get_inputs()
             z = model.model(inputs)
-            predict.add(z)
-        predict.plot(tb_logger=tb_logger)
+            predictor.add(z)
+        predictor.plot(tb_logger=tb_logger)
 
 

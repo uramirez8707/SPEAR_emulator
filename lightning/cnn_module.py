@@ -1,32 +1,12 @@
 import numpy as np
 import torch
-import xarray as xr
+from util import load_data
 
-#example:  data_dict = {"t_ref": "data/atmos.192101-201012.t_ref.nc"}
-
-def load_data(data_dict: dict, test_with_global_average: bool = False) -> dict[str, np.ndarray]:
-    """Open NetCDF files and return a mapping of variable names to arrays."""
-    
-    data = {}
-    for variable, datafile in data_dict.items():
-        with xr.open_dataset(datafile, decode_timedelta=True) as ds:
-            data[variable] = ds[variable].values
-        
-    key = list(data.keys())[0]
-    ntimes = data[key].shape[0]
-        
-    datalist = []
-    if test_with_global_average:
-        for itime in range(ntimes):
-            datalist.append([data[variable][itime].mean() for variable in data.keys()])
-    else:
-        for itime in range(ntimes):
-            datalist.append([data[variable][itime] for variable in data.keys()])
-    
-    return np.array(datalist), ntimes
-    
 class TrainingDataset(torch.utils.data.Dataset):
-    """A PyTorch Dataset for NetCDF data."""
+    """
+    A PyTorch Dataset for NetCDF data.
+    data = [time, n_features, height, width]
+    """
 
     def __init__(
         self,
@@ -35,8 +15,7 @@ class TrainingDataset(torch.utils.data.Dataset):
     ):
         super().__init__()
         self.data = torch.tensor(data, dtype=torch.float32)
-        if self.data.ndim != 2:
-            raise ValueError("TrainingDataset expects data with shape (n_timesteps, n_features).")
+        self.nfeatures = self.data.shape[1]
         self.sequence_length = sequence_length
 
     def __len__(self):
@@ -46,16 +25,19 @@ class TrainingDataset(torch.utils.data.Dataset):
         """
         for example sequence_length=3, idx=3, returns
         inputs = [
-          [var1[3], var2[3], var3[3]],
-          [var1[4], var2[4], var3[4]],
-          [var1[5], var2[5], var3[5]]
+          var1[3], var1[4], var1[5],
+          var2[3], var2[4], var2[5],
+          var3[3], var3[4], var3[5]
         ]
         target = [var1[6], var2[6], var3[6]]
         """
-        inputs = self.data[idx:idx+self.sequence_length]
-        target = self.data[idx+self.sequence_length]
+        inputs = torch.cat(
+            [self.data[idx:idx+self.sequence_length, ivar] for ivar in range(self.nfeatures)]
+        )
+        target = torch.stack(
+            [self.data[idx+self.sequence_length, ivar] for ivar in range(self.nfeatures)], dim=0
+        )
         return inputs, target
-
 
 class PredictDataset:
     """A PyTorch Dataset for NetCDF data."""
@@ -73,6 +55,7 @@ class PredictDataset:
 
         self.data_dict = data_dict
         self.data, self.ntimes = load_data(self.data_dict, self.test_with_global_average)
+        self.nfeatures = self.data.shape[1]
 
         # initial predictions as the first sequence_length
         self.predictions = torch.tensor(self.data[:self.sequence_length], dtype=torch.float32)
@@ -80,19 +63,18 @@ class PredictDataset:
     def get_inputs(self):
         """
         Returns the last sequence_length predictions as input.
-        self.predictions.shape = [n_timesteps, n_features]
-        pytorch modules expect [batch, sequence_length, n_features], which is achieved by unsqueeze(0)
         """
-        return self.predictions[-self.sequence_length:].unsqueeze(0)  
-
+        return torch.cat(
+            [self.predictions[-self.sequence_length:, ivar] for ivar in range(self.nfeatures)]
+        )
+    
     def add(self, value):
         """
         Adds a new prediction to the dataset.
         value.shape = [batch, n_features]
         self.predictions.shape = [n_timesteps, n_features]
         """
-        print(self.predictions.shape, value.shape)
-        self.predictions = torch.cat((self.predictions, value.detach()), dim=0)
+        self.predictions = torch.cat([self.predictions, value.detach().unsqueeze(0)])
     
     def plot(self, tb_logger=None):
         """Plot the predictions."""
@@ -108,3 +90,27 @@ class PredictDataset:
                 tb_logger.experiment.add_figure(f"evaluation {ivar}", fig)
             plt.show()
 
+class SimpleCNN(torch.nn.Module):
+    """A simple CNN model with one convolutional layer."""
+
+    def __init__(self, in_channels: int = 3):
+        super().__init__()        
+        self.cnn1 = torch.nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=2*in_channels,
+            kernel_size=3,
+            padding=1
+        )
+        self.relu = torch.nn.ReLU()
+        self.cnn2 = torch.nn.Conv2d(
+            in_channels=2*in_channels,
+            out_channels=2,
+            kernel_size=3,
+            padding=1
+        )
+
+    def forward(self, x):
+
+        y = self.relu(self.cnn1(x))
+        y = self.cnn2(y)
+        return y
