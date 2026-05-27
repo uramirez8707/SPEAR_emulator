@@ -63,25 +63,37 @@ def procress_static_variables(static_variables, in_dir, out_dir):
 def fix_GFDL_file(input_file, output_file, is_static=False):
     ds = xr.open_dataset(input_file, chunks={'time': 'auto'})
 
+    coord_mapping = {
+        'grid_yt': 'latitude',
+        'grid_xt': 'longitude',
+        'yh': 'latitude',
+        'xh': 'longitude'
+    }
+
     rename_dict = {}
-    if 'grid_yt' in ds.dims or 'grid_yt' in ds.variables:
-        rename_dict['grid_yt'] = 'latitude'
-    if 'grid_xt' in ds.dims or 'grid_xt' in ds.variables:
-        rename_dict['grid_xt'] = 'longitude'
+    for old_name, new_name in coord_mapping.items():
+        if old_name in ds.dims or old_name in ds.variables:
+            rename_dict[old_name] = new_name
 
     if rename_dict:
         ds = ds.rename(rename_dict)
 
+    bounds_vars_to_drop = []
+    for var in ds.variables:
+        if 'bounds' in ds[var].attrs:
+            bounds_vars_to_drop.append(ds[var].attrs['bounds'])
+            del ds[var].attrs['bounds']
+
+    if bounds_vars_to_drop:
+        ds = ds.drop_vars(bounds_vars_to_drop, errors='ignore')
+
     if is_static:
         ds.to_netcdf(output_file)
         ds.close()
-
     else:
         ds_standard = ds.convert_calendar('standard', align_on='date')
-        ds_standard = ds_standard.drop_vars('time_bnds', errors='ignore')
-        if 'bounds' in ds_standard.time.attrs:
-            del ds_standard.time.attrs['bounds']
         ds_standard.to_netcdf(output_file)
+
         ds.close()
         ds_standard.close()
 
@@ -179,6 +191,30 @@ def procress_coarsed_variables(coarse_variables, in_dir:Path, out_dir:Path,
 
     return out
 
+def get_units(file, variable):
+    with xr.open_dataset(file) as ds:
+        units = ds[variable].attrs.get("units")
+
+    return {
+        "variable": variable,
+        "units": units,
+    }
+
+def dump_variable_metadata(variables, in_dir):
+    out = []
+    print("")
+    for variable in variables[0]:
+        print(f"Getting Metadata for {variable}")
+
+        var_dir = in_dir / variable
+        if var_dir.is_file():
+            first_file = var_dir
+            variable = variable.removesuffix(".nc")
+        else:
+            first_file = sorted( f for f in var_dir.iterdir() if f.is_file())[0]
+        out.append(get_units(first_file, variable))
+    return out
+
 out_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/ANEMOI-READY")
 raw_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/RAW")
 coarse_data_dir = Path("/scratch4/GFDL/gfdlscr/Uriel.Ramirez/archive_260429/COARSE")
@@ -190,6 +226,12 @@ static_variables, dynamic_variables, coarsed_variables = get_variable_list(out_d
 print(f"Coarsed variables {coarsed_variables}")
 print(f"Dynamic variables {dynamic_variables}")
 print(f"Static variables {static_variables}")
+
+metadata_path = Path("metadata.yaml")
+if not metadata_path.exists():
+    metadata = dump_variable_metadata([static_variables + dynamic_variables + coarsed_variables], raw_data_dir)
+    with open(metadata_path, "w") as f:
+        yaml.safe_dump(metadata, f, sort_keys=False)
 
 coarsed_config = procress_coarsed_variables(coarsed_variables, coarse_data_dir, out_data_dir, pressure_level_label)
 dynamic_config = procress_dynamic_variables(dynamic_variables, raw_data_dir, out_data_dir)
