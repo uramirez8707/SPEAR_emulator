@@ -1,0 +1,46 @@
+name: WUT4
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python
+  - python=3.11
+  - pip
+
+  # Scientific stack
+  - numpy>=1.26,<2
+  - scipy
+  - pandas
+  - xarray
+  - netcdf4
+  - dask
+  - matplotlib
+  - pyyaml
+  - tqdm
+  - tabulate
+
+  # PyTorch
+  - pytorch=2.2
+  - torchvision=0.17
+  - torchaudio=2.2
+  - pytorch-cuda=11.8
+  
+  - pytorch-lightning
+  - torchmetrics
+
+  - pip:
+      - shapely
+      - pyproj
+      - cartopy
+
+      - torch-harmonics
+      - "makani @ git+https://github.com/NVIDIA/makani.git"
+      - moviepy
+      - anemoi-datasets
+      - anemoi-models
+      - anemoi-training
+      - anemoi-graphs
