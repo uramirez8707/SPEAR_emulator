@@ -3,11 +3,14 @@ import matplotlib.pyplot as plt
 from utils import configSetUp
 from scipy.stats import linregress
 import gc
+import yaml
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
 class OutputData:
     def __init__(self, model_label, predictions, ground_truth,
                  times, lattitudes, nlat, longitudes, nlon,
-                 output_targets, fig_dir):
+                 output_targets, working_dir, fig_dir):
         self.model_label = model_label
         self.times = times
         self.lattitudes = lattitudes
@@ -18,6 +21,25 @@ class OutputData:
         self.ground_truth = ground_truth
         self.output_targets = output_targets
         self.fig_dir = fig_dir
+        self.working_dir = working_dir
+        self.add_variable_metadata()
+
+        print(self.metadata)
+
+    def add_variable_metadata(self):
+        metadata_path = f"{self.working_dir}/metadata.yaml"
+
+        with open(metadata_path) as f:
+            self.metadata = yaml.safe_load(f)
+
+    def get_variable_units(self, variable):
+        variable = variable.rsplit("_", 1)[0]
+        print(f"Getting the units for {variable}")
+        for item in self.metadata:
+            if variable in item["variable"]:
+                return item["units"]
+
+        raise Exception(f"Unable to get the correct units for {variable}")
 
     def find_target_index(self, target):
         for i, output_var in enumerate(self.output_targets):
@@ -26,12 +48,12 @@ class OutputData:
         raise RuntimeError(f"Unable to find {target} in {self.output_targets}")
 
     def plot_spatial_maps(self, target, label):
+        units = self.get_variable_units(target)
+
         target_index = self.find_target_index(target)
 
         truth_start = self.ground_truth[0].detach().numpy()[:, target_index, :, :].squeeze()
         pred_start = self.predictions[0].detach().numpy()[:, target_index, :, :].squeeze()
-
-        print(f"SHAPES {truth_start.shape} - {pred_start.shape}")
 
         truth_end = self.ground_truth[-1].detach().numpy()[:, target_index, :, :].squeeze()
         pred_end = self.predictions[-1].detach().numpy()[:, target_index, :, :].squeeze()
@@ -44,38 +66,51 @@ class OutputData:
 
         lons, lats = np.meshgrid(lon, lat)
 
-        fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(18, 10), layout='constrained')
-        fig.suptitle(f'Spatial Snapshot: {self.model_label}', fontsize=16)
+        fig, axes = plt.subplots(
+            nrows=2, ncols=3, figsize=(18, 10), layout='constrained',
+            subplot_kw={'projection': ccrs.PlateCarree()}
+        )
+        fig.suptitle(f'Spatial Snapshot: {target} \n{self.model_label}', fontsize=16)
 
         global_vmin = min(truth_start.min(), pred_start.min(), truth_end.min(), pred_end.min())
         global_vmax = max(truth_start.max(), pred_start.max(), truth_end.max(), pred_end.max())
         global_max_diff = max(np.max(np.abs(diff_start)), np.max(np.abs(diff_end)))
 
-        im0 = axes[0, 0].pcolormesh(lons, lats, truth_start, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto')
+        im0 = axes[0, 0].pcolormesh(lons, lats, truth_start, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[0, 0].set_title(f'Ground Truth (t={self.times[0]})')
 
-        im1 = axes[0, 1].pcolormesh(lons, lats, pred_start, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto')
+        im1 = axes[0, 1].pcolormesh(lons, lats, pred_start, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[0, 1].set_title(f'Prediction (t={self.times[0]})')
-        fig.colorbar(im1, ax=axes[0, :2], orientation='vertical', fraction=0.02, pad=0.04)
+        
+        cbar1 = fig.colorbar(im1, ax=axes[0, :2], orientation='vertical', fraction=0.02, pad=0.04)
+        cbar1.set_label(f"[{units}]")
 
-        im2 = axes[0, 2].pcolormesh(lons, lats, diff_start, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto')
+        im2 = axes[0, 2].pcolormesh(lons, lats, diff_start, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto', transform=ccrs.PlateCarree())
         axes[0, 2].set_title('Difference (Pred - Truth)')
-        fig.colorbar(im2, ax=axes[0, 2], orientation='vertical', fraction=0.046, pad=0.04)
+        
+        cbar2 = fig.colorbar(im2, ax=axes[0, 2], orientation='vertical', fraction=0.046, pad=0.04)
+        cbar2.set_label(f"Diff [{units}]")
 
-        im3 = axes[1, 0].pcolormesh(lons, lats, truth_end, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto')
+        im3 = axes[1, 0].pcolormesh(lons, lats, truth_end, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[1, 0].set_title(f'Ground Truth (t={self.times[-1]})')
 
-        im4 = axes[1, 1].pcolormesh(lons, lats, pred_end, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto')
+        im4 = axes[1, 1].pcolormesh(lons, lats, pred_end, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[1, 1].set_title(f'Prediction (t={self.times[-1]})')
-        fig.colorbar(im4, ax=axes[1, :2], orientation='vertical', fraction=0.02, pad=0.04)
+        
+        cbar3 = fig.colorbar(im4, ax=axes[1, :2], orientation='vertical', fraction=0.02, pad=0.04)
+        cbar3.set_label(f"[{units}]")
 
-        im5 = axes[1, 2].pcolormesh(lons, lats, diff_end, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto')
+        im5 = axes[1, 2].pcolormesh(lons, lats, diff_end, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto', transform=ccrs.PlateCarree())
         axes[1, 2].set_title('Difference (Pred - Truth)')
-        fig.colorbar(im5, ax=axes[1, 2], orientation='vertical', fraction=0.046, pad=0.04)
+        
+        cbar4 = fig.colorbar(im5, ax=axes[1, 2], orientation='vertical', fraction=0.046, pad=0.04)
+        cbar4.set_label(f"Diff [{units}]")
 
         for ax in axes.flatten():
-            ax.set_xlabel('Longitude')
-            ax.set_ylabel('Latitude')
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
+            gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+            gl.top_labels = False
+            gl.right_labels = False
 
         plt.savefig(f"{self.fig_dir}/spatial_snapshot.{target}.{label}.png", dpi=300, bbox_inches='tight')
 
@@ -87,6 +122,13 @@ class ModelResults:
     def add_model(self, model:OutputData):
         print(f"Adding model {model.model_label}")
         self.models.append(model)
+
+    def create_var_plots(self, config):
+        variables = config.outputs
+        for var in variables:
+            self.plot_RMSE(var)
+            self.plot_temporal_evolution(var, config)
+            self.plot_scatter_pred_vs_actual(var, config)
 
     def plot_RMSE(self, target):
         regions = {
@@ -154,7 +196,7 @@ class ModelResults:
 
     def plot_temporal_evolution(self, target, config:configSetUp):
 
-        units = config.get_var_units(target)
+        units = self.models[0].get_variable_units(target)
         print(f"Plotting the temporal evolution for {target} with units of {units}")
 
         num_models = len(self.models)
@@ -227,7 +269,7 @@ class ModelResults:
         plt.close(fig)
 
     def plot_scatter_pred_vs_actual(self, target, config, sample_size=3000):
-        units = config.get_var_units(target)
+        units = self.models[0].get_variable_units(target)
         print(f"Plotting scatter plots for {target} with units of {units}")
 
         num_models = len(self.models)
