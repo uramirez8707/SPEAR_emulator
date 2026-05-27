@@ -182,7 +182,7 @@ def get_dataloaders(config:configSetUp):
         logger.setLevel(logging.DEBUG)
 
     logger.info(f"Getting the training dataset from file: {config.training}")
-    training = open_dataset(config.training)
+    training = open_dataset(config.training, select=config.inputs)
     if sorted(list(training.variables)) != sorted(config.inputs):
         raise RuntimeError(f"Expected inputs and the dataset variables do not match the variables available in the dataset..."
                            f"\n---> Expected inputs: {config.inputs}"
@@ -215,14 +215,14 @@ def get_dataloaders(config:configSetUp):
 
     # Construct validation dataset
     logger.info(f"Getting the validating dataset from file: {config.validating}")
-    validating = open_dataset(config.validating)
+    validating = open_dataset(config.validating, select=config.inputs)
     log_dataset_info(logger, "Validating", validating)
     validating_tensor = get_tensor(config, validating, "validating")
     validating_set = SPEARDataStore(validating_tensor, validating)
 
     # Construct testing dataset
     logger.info(f"Getting the testing dataset from file: {config.testing}")
-    testing = open_dataset(config.testing)
+    testing = open_dataset(config.testing, select=config.inputs)
     log_dataset_info(logger, "Testing", testing)
     testing_tensor = get_tensor(config, testing, "testing")
     testing_set = SPEARDataStore(testing_tensor, testing)
