@@ -1,5 +1,9 @@
 import re
 import yaml
+import time
+import torch
+import pytorch_lightning as L
+from pytorch_lightning.callbacks import Callback
 
 def log_dataset_info(logger, label, dataset):
     logger.debug(f"{label} shape: \n"
@@ -9,6 +13,32 @@ def log_dataset_info(logger, label, dataset):
                  f"    ngridpoints: {dataset.shape[3]}")
     logger.info(f"{label} time period:\n"
                 f"    {dataset.dates[0]} to {dataset.dates[-1]}")
+
+class FortranTracker(Callback):
+    def on_train_epoch_start(self, trainer, pl_module):
+        # Start the stopwatch when the epoch begins
+        self.epoch_start_time = time.time()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        elapsed_time = time.time() - self.epoch_start_time
+        mins, secs = divmod(elapsed_time, 60)
+
+        max_mem_bytes = torch.cuda.max_memory_allocated()
+        max_mem_gb = max_mem_bytes / (1024 ** 3)
+
+        train_loss = trainer.callback_metrics.get('train_loss', 'N/A')
+        if isinstance(train_loss, torch.Tensor):
+            train_loss = f"{train_loss.item():.4f}"
+
+        val_loss = trainer.callback_metrics.get('val_loss', 'N/A')
+        if isinstance(val_loss, torch.Tensor):
+            val_loss = f"{val_loss.item():.4f}"
+
+        print(f"\n>>> [Epoch {trainer.current_epoch}] "
+              f"Time: {int(mins)}m {int(secs)}s | "
+              f"Train Loss: {train_loss} | "
+              f"Val Loss: {val_loss} | "
+              f"Peak VRAM: {max_mem_gb:.2f} GB <<<")
 
 class configSetUp:
     def __init__(self, config_yaml):
@@ -39,6 +69,8 @@ class configSetUp:
         hyperparameters = raw_config['hyperparameters']
         self.batch_size = hyperparameters['batch_size']
         self.learning_rate = hyperparameters['learning_rate']
+        self.precision = hyperparameters.get('precision', 'bf16-mixed')
+
         self.data_config = raw_config['data_config']
 
         self.seed = raw_config['seed']
@@ -50,6 +82,7 @@ class configSetUp:
             self.sfno = raw_config['sfno']
         if "cnn" in raw_config:
             self.cnn = raw_config['cnn']
+        self.nepochs = raw_config['nepochs']
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)

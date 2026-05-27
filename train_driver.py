@@ -1,7 +1,7 @@
 from model import SpearEmulator, AutoregressiveSpearEmulator
 from data_load import get_dataloaders, get_updated_channels
 import pytorch_lightning as L
-from utils import configSetUp
+from utils import configSetUp, FortranTracker
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 import os
@@ -16,14 +16,17 @@ def train_model(config, label, working_dir):
 
     L.seed_everything(config.seed, workers=True, verbose=False)
 
-    ckpt_dir = f"{working_dir}/output/{label}/checkpoints"
+    run_dir = f"{working_dir}/output/{label}"
+    ckpt_dir = os.path.join(run_dir, "checkpoints")
     last_ckpt_path = os.path.join(ckpt_dir, "last.ckpt")
     checkpoint_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
         save_last=True,
     )
 
-    logger = CSVLogger(f"{working_dir}/output", version=label)
+    logger = CSVLogger(
+            save_dir=run_dir,
+            name="logs")
 
     method = config.get_data_load_method()
     if method == "autoregressive":
@@ -32,13 +35,17 @@ def train_model(config, label, working_dir):
         SPEAR = SpearEmulator(config)
 
     trainer = L.Trainer(
-        max_epochs=50,
+        max_epochs=config.nepochs,
         logger=logger,
-        callbacks=[checkpoint_callback],
+        callbacks=[
+            checkpoint_callback,
+            FortranTracker()
+            ],
         accelerator="auto",
         devices=1,
         deterministic=True,
-        benchmark=False
+        benchmark=False,
+        precision=config.precision
     )
 
     resume_ckpt = last_ckpt_path if os.path.exists(last_ckpt_path) else None

@@ -178,7 +178,7 @@ class NormalizeMe(nn.Module):
         return (x - self.means) / self.stds
 
 class SpearEmulator(L.LightningModule):
-    def __init__(self, config)
+    def __init__(self, config):
         super().__init__()
 
         self._logger = logger
@@ -563,13 +563,8 @@ class AutoregressiveSpearEmulator(SpearEmulator):
             # Prepare x for the next time step
             # Update the outputs with the predictions
             next_x = current_x.clone()
-            if not self.shapes_logged:
-                self._logger.debug(f"{next_x[:, 0:len(self.input_channels), 0, 0]}")
 
             for i, output in enumerate(self.output_channels):
-              if not self.shapes_logged:
-                 self._logger.debug(f"{output} - {self.input_channels}")
-
               idx_in_x = self.find_input_channel_index(output)
               if not self.shapes_logged:
                  self._logger.debug(f"step: {step} - replacing {output} "
