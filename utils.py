@@ -48,6 +48,8 @@ class configSetUp:
         self.model_type = raw_config['model_type']
         if "sfno" in raw_config:
             self.sfno = raw_config['sfno']
+        if "cnn" in raw_config:
+            self.cnn = raw_config['cnn']
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)
@@ -161,6 +163,9 @@ class configSetUp:
             return years[0], years[1]
         else:
             raise RuntimeError(f"Could not parse {label} years. Expected YYYY-YYYY but got {string}")
+
+    def get_cnn_filters(self):
+        return tuple(self.cnn['filters'])
 
     def dump_info(self):
         pass
