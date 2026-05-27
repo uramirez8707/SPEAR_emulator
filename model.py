@@ -6,7 +6,7 @@ import numpy as np
 import torch.optim as optim
 import logging
 from tabulate import tabulate
-from modulus.models.sfno.sfno import SphericalFourierNeuralOperatorNet
+from makani.models.networks.sfnonet import SphericalFourierNeuralOperatorNet
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,8 +58,9 @@ def construct_model(in_channels, out_channels, filters):
 
     return model
 
-def construct_model_better_padding(in_channels, out_channels, filters):
+def construct_model_better_padding(in_channels, out_channels, config):
     layers = []
+    filters = config.get_cnn_filters()
 
     # Encoder
     prev_channel = in_channels
@@ -110,13 +111,14 @@ def construct_sfno_model(config, in_channels, out_channels):
     logger.info(f"--> emded_dim: {config.sfno['emded_dim']}")
     logger.info(f"--> num_layers: {config.sfno['num_layers']}")
     return SphericalFourierNeuralOperatorNet(
-         in_chans=in_channels,
-         out_chans=out_channels,
-         spectral_transform="sht",
-         embed_dim=config.sfno['emded_dim'],
-         num_layers=config.sfno['num_layers'],
-         grid_size=(config.nlat, config.nlon)
-     )
+        inp_chans=in_channels,
+        out_chans=out_channels,
+        inp_shape=(config.nlat, config.nlon),
+        out_shape=(config.nlat, config.nlon),
+        spectral_transform="sht",
+        embed_dim=config.sfno['emded_dim'],
+        num_layers=config.sfno['num_layers']
+    )
 
 def get_statistics(config, channel_type="input"):
     expanded_means = []
@@ -176,7 +178,7 @@ class NormalizeMe(nn.Module):
         return (x - self.means) / self.stds
 
 class SpearEmulator(L.LightningModule):
-    def __init__(self, config, filters=(16, 32, 32)):
+    def __init__(self, config)
         super().__init__()
 
         self._logger = logger
@@ -203,7 +205,7 @@ class SpearEmulator(L.LightningModule):
         self.setup_area_weights(config)
         self.setup_target_weights(config)
 
-        self.setup_model_architecture(config, input_dim, output_dim, filters)
+        self.setup_model_architecture(config, input_dim, output_dim)
         self.log_input_channels(config)
 
         if other_inputs is not None:
@@ -350,12 +352,13 @@ class SpearEmulator(L.LightningModule):
         self.register_buffer("target_weights", t_weights_tensor)
         self._logger.debug(f"Weights have shape: {list(t_weights_tensor.shape)}")
 
-    def setup_model_architecture(self, config, input_dim, output_dim, filters):
+    def setup_model_architecture(self, config, input_dim, output_dim):
         self._logger.info(f"Using {config.model_type} architecture type")
         if config.model_type == "default":
+            filters = (16, 32, 32)
             self.model = construct_model(input_dim, output_dim, filters)
         elif config.model_type == "cnn-padding":
-            self.model = construct_model_better_padding(input_dim, output_dim, filters)
+            self.model = construct_model_better_padding(input_dim, output_dim, config)
         elif config.model_type == "sfno":
             self.model = construct_sfno_model(config, input_dim, output_dim)
         else:
