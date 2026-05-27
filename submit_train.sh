@@ -7,13 +7,13 @@
 #SBATCH --cpus-per-task=192
 #SBATCH --gres=gpu:h100:1
 #SBATCH --mem=128G
-#SBATCH --time=01:30:00
+#SBATCH --time=06:00:00
 #SBATCH --job-name=SPEAR_emulator_training
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=uriel.ramirez@noaa.gov
 
 module load rdhpcs-conda/25.11.0
-conda activate /scratch4/GFDL/gfdlscr/Uriel.Ramirez/conda/envs/WUT
+conda activate /scratch4/GFDL/gfdlscr/Uriel.Ramirez/conda/envs/WUT4
 
 export LD_LIBRARY_PATH=${CONDA_PREFIX}/lib
 

@@ -23,7 +23,7 @@ def train_model(config, label, working_dir):
         save_last=True,
     )
 
-    logger = CSVLogger(f"{working_dir}/output", name="spear_emulator", version=label)
+    logger = CSVLogger(f"{working_dir}/output", version=label)
 
     method = config.get_data_load_method()
     if method == "autoregressive":
@@ -32,7 +32,7 @@ def train_model(config, label, working_dir):
         SPEAR = SpearEmulator(config)
 
     trainer = L.Trainer(
-        max_epochs=1,
+        max_epochs=50,
         logger=logger,
         callbacks=[checkpoint_callback],
         accelerator="auto",
@@ -55,6 +55,10 @@ def train_model(config, label, working_dir):
 
     print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
 
+#working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/dev"
+#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_sfno.yaml")
+#train_model(config, "autoregressive_nsteps_3_sfno", working_dir)
+
 #config = configSetUp(config_yaml="examples/config_default.yaml")
 #train_model(config, "nlag_3")
 #
@@ -68,11 +72,7 @@ def train_model(config, label, working_dir):
 #print("------------------------------------------")
 #
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/dev"
-
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
-train_model(config, "autoregressive_nsteps_3", working_dir)
-
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run2"
 config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
 train_model(config, "autoregressive_nsteps_3_padding", working_dir)
 
