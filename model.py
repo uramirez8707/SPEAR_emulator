@@ -1,12 +1,14 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
 import pytorch_lightning as L
 import numpy as np
 import torch.optim as optim
 import logging
 from tabulate import tabulate
-from makani.models.networks.sfnonet import SphericalFourierNeuralOperatorNet
+from architectures.snfo import construct_sfno_model
+from architectures.cnn import construct_model, construct_model_better_padding
+from architectures.unet import construct_unet_model
+from architectures.gnn import construct_gnn_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,111 +16,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-def construct_model(in_channels, out_channels, filters):
-    layers = []
-
-    # Encoder
-    prev_channel = in_channels
-    for f in filters[:-1]:
-        layers.extend([
-            nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(f),
-            nn.ReLU(),
-        ])
-        prev_channel = f
-
-    # Bottleneck
-    bottleneck_channels = filters[-1]
-    layers.extend([
-        nn.Conv2d(prev_channel, bottleneck_channels, kernel_size=3, padding=1),
-        nn.BatchNorm2d(bottleneck_channels),
-        nn.ReLU(inplace=True)
-    ])
-
-    # Decoder
-    reversed_filters = list(reversed(filters[:-1]))
-    prev_channel = bottleneck_channels
-
-    for i, f in enumerate(reversed_filters):
-        layers.extend([
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(f),
-            nn.ReLU(inplace=True)
-        ])
-        prev_channel = f
-
-    # Final Output Layer
-    layers.append(
-        nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=1)
-    )
-
-    model = nn.Sequential(*layers)
-
-    return model
-
-def construct_model_better_padding(in_channels, out_channels, config):
-    layers = []
-    filters = config.get_cnn_filters()
-
-    # Encoder
-    prev_channel = in_channels
-    for f in filters[:-1]:
-        layers.extend([
-            GlobalGridPad2d(padding=1),
-            nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=0),
-            nn.BatchNorm2d(f),
-            nn.ReLU(),
-        ])
-        prev_channel = f
-
-    # Bottleneck
-    bottleneck_channels = filters[-1]
-    layers.extend([
-        GlobalGridPad2d(padding=1),
-        nn.Conv2d(prev_channel, bottleneck_channels, kernel_size=3, padding=0),
-        nn.BatchNorm2d(bottleneck_channels),
-        nn.ReLU(inplace=True)
-    ])
-
-    # Decoder
-    reversed_filters = list(reversed(filters[:-1]))
-    prev_channel = bottleneck_channels
-
-    for i, f in enumerate(reversed_filters):
-        layers.extend([
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            GlobalGridPad2d(padding=1),
-            nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=0),
-            nn.BatchNorm2d(f),
-            nn.ReLU(inplace=True)
-        ])
-        prev_channel = f
-
-    # Final Output Layer
-    layers.extend([
-        GlobalGridPad2d(padding=1),
-        nn.Conv2d(prev_channel, out_channels, kernel_size=3, padding=0)
-    ])
-
-    model = nn.Sequential(*layers)
-
-    return model
-
-def construct_sfno_model(config, in_channels, out_channels):
-    logger.info("Constructing the snfo architecture")
-    logger.info(f"--> emded_dim: {config.sfno['emded_dim']}")
-    logger.info(f"--> num_layers: {config.sfno['num_layers']}")
-    return SphericalFourierNeuralOperatorNet(
-        inp_chans=in_channels,
-        out_chans=out_channels,
-        inp_shape=(config.nlat, config.nlon),
-        out_shape=(config.nlat, config.nlon),
-        spectral_transform="sht",
-        embed_dim=config.sfno['emded_dim'],
-        num_layers=config.sfno['num_layers']
-    )
 
 def get_statistics(config, channel_type="input"):
     expanded_means = []
@@ -146,24 +43,6 @@ def get_statistics(config, channel_type="input"):
     stds_tensor = torch.tensor(expanded_stds, dtype=torch.float32).view(1, -1, 1, 1)
 
     return means_tensor, stds_tensor
-
-class GlobalGridPad2d(nn.Module):
-    """
-    Pads the longitude (width) circularly, 
-    and the latitude (height) by replicating the edge values.
-    """
-    def __init__(self, padding=1):
-        super().__init__()
-        self.p = padding
-
-    def forward(self, x):
-        # F.pad takes boundaries as: (Left, Right, Top, Bottom)
-        # 1. Pad longitude circularly
-        x = F.pad(x, (self.p, self.p, 0, 0), mode='circular')
-
-        # 2. Pad latitude by replicating the poles
-        x = F.pad(x, (0, 0, self.p, self.p), mode='replicate')
-        return x
 
 class NormalizeMe(nn.Module):
     def __init__(self, config):
@@ -209,8 +88,10 @@ class SpearEmulator(L.LightningModule):
         self.log_input_channels(config)
 
         if other_inputs is not None:
-            self._logger.info("Other input channels:\n    " + "\n    ".join(other_inputs))
+            self._logger.info("- Other input channels:\n    " + "\n    ".join(other_inputs))
 
+        self.diag_channels = config.diag_channels
+        self._logger.info("- Diagnostics only: \n       " + "\n    ".join(self.diag_channels))
         self.log_output_channels(config)
 
         self.setup_residual_indices(config)
@@ -360,7 +241,11 @@ class SpearEmulator(L.LightningModule):
         elif config.model_type == "cnn-padding":
             self.model = construct_model_better_padding(input_dim, output_dim, config)
         elif config.model_type == "sfno":
-            self.model = construct_sfno_model(config, input_dim, output_dim)
+            self.model = construct_sfno_model(config, input_dim, output_dim, self._logger)
+        elif config.model_type == "unet":
+            self.model = construct_unet_model(config, input_dim, output_dim)
+        elif config.model_type == "gnn":
+            self.model = construct_gnn_model(config, input_dim, output_dim)
         else:
             raise RuntimeError(f"{config.model_type} has not been implemented as a model architecture")
 
@@ -565,6 +450,9 @@ class AutoregressiveSpearEmulator(SpearEmulator):
             next_x = current_x.clone()
 
             for i, output in enumerate(self.output_channels):
+              # Skip diagnostics ...
+              if output in self.diag_channels:
+                    continue
               idx_in_x = self.find_input_channel_index(output)
               if not self.shapes_logged:
                  self._logger.debug(f"step: {step} - replacing {output} "
@@ -572,16 +460,15 @@ class AutoregressiveSpearEmulator(SpearEmulator):
 
               next_x[:, idx_in_x, ...] = preds[:, i, ...]
 
-            # Update the other dynamic variables with the next actual values
-            for i, dyn_var in enumerate(self.dynamic_channels):
-                # Skip variables that we just predicted!
-                if any(dyn_var in output for output in self.output_channels):
-                    continue
-                idx_in_x = self.find_input_channel_index(dyn_var)
+            # Update the diagnostic variables with the next actual values
+            for i, diag_var in enumerate(self.diag_channels):
+                idx_in_x = self.find_input_channel_index(diag_var)
+                idx_in_y = self.output_channels.index(diag_var)
+
                 if not self.shapes_logged:
-                    self._logger.debug(f"step: {step} - replacing {dyn_var} "
-                                       f"next_x[:, {idx_in_x}, ...] = y_step_all[:, {i}, ...]")
-                next_x[:, idx_in_x, ...] = y_step_all[:, i, ...]
+                    self._logger.debug(f"step: {step} - replacing {diag_var} "
+                                       f"next_x[:, {idx_in_x}, ...] = y_step_all[:, {idx_in_y}, ...]")
+                next_x[:, idx_in_x, ...] = y_step_all[:, idx_in_y, ...]
             current_x = next_x
 
         self.shapes_logged = True

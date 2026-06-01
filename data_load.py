@@ -109,6 +109,7 @@ def get_updated_channels(config):
     nlags = config.get_nlags()
     dynamics = config.dynamics
     statics = config.statics
+    diags = config.diagnostics_only
 
     in_channels = []
     for var in dynamics:
@@ -123,7 +124,11 @@ def get_updated_channels(config):
     for var in config.outputs:
         out_channels.append(f"{var}(t)")
 
-    return in_channels, out_channels
+    diag_channels = []
+    for var in diags:
+        diag_channels.append(f"{var}(t)")
+
+    return in_channels, out_channels, diag_channels
 
 def split_data_set(config, dataset):
     data_type = config.data_config.get("type") # "residual" or "default"

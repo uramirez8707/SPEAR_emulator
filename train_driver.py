@@ -10,8 +10,8 @@ def train_model(config, label, working_dir):
     config.dump_info()
 
     training, validating, testing  = get_dataloaders(config)
-    input_channels, out_channels = get_updated_channels(config)
-    config.set_channels(input_channels, out_channels)
+    input_channels, out_channels, diag_channels = get_updated_channels(config)
+    config.set_channels(input_channels, out_channels, diag_channels)
     config.set_grid(training)
 
     L.seed_everything(config.seed, workers=True, verbose=False)
@@ -79,7 +79,17 @@ def train_model(config, label, working_dir):
 #print("------------------------------------------")
 #
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run2"
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
-train_model(config, "autoregressive_nsteps_3_padding", working_dir)
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run3"
+
+#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_sfno.yaml")
+#train_model(config, "autoregressive_nsteps_3_sfno", working_dir)
+
+#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
+#train_model(config, "autoregressive_nsteps_3_padding", working_dir)
+
+#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_unet.yaml")
+#train_model(config, "autoregressive_nsteps_3_unet", working_dir)
+
+config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_gnn.yaml")
+train_model(config, "autoregressive_nsteps_3_gnn", working_dir)
 

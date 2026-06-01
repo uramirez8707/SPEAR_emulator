@@ -12,7 +12,7 @@ def plot_var_loss(train_df, val_df, output, fig_dir, ymin, ymax):
     plt.plot(val_df['step'], val_df[f'val_loss{label}'], label='Validation Loss', marker='o', linewidth=2)
 
     plt.xlabel('Training Steps')
-    plt.ylabel('MSE Loss - {output}')
+    plt.ylabel(f'MSE Loss - {output}')
     plt.title('SPEAR Emulator Training Curve')
     plt.ylim((ymin, ymax))
 
@@ -20,6 +20,7 @@ def plot_var_loss(train_df, val_df, output, fig_dir, ymin, ymax):
     plt.grid(True, linestyle='--', alpha=0.6)
 
     plt.savefig(f"{fig_dir}/losses.{output}.png", dpi=300, bbox_inches='tight')
+    plt.close()
 
 def get_ylim(df, output_channels):
     all_losses = []

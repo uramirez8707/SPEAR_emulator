@@ -113,6 +113,7 @@ class OutputData:
             gl.right_labels = False
 
         plt.savefig(f"{self.fig_dir}/spatial_snapshot.{target}.{label}.png", dpi=300, bbox_inches='tight')
+        plt.close()
 
 class ModelResults:
     def __init__(self, fig_dir):

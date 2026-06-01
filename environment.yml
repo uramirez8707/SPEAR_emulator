@@ -44,3 +44,4 @@ dependencies:
       - anemoi-models
       - anemoi-training
       - anemoi-graphs
+      - trimesh

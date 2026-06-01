@@ -65,6 +65,9 @@ class configSetUp:
         self.dynamics = [
             var for var, info in self.var_config.items() if not info.get('is_static') and info.get('is_input')
         ]
+        self.diagnostics_only = [
+            var for var, info in self.var_config.items() if info.get('diagnostic_only')
+        ]
 
         hyperparameters = raw_config['hyperparameters']
         self.batch_size = hyperparameters['batch_size']
@@ -82,6 +85,11 @@ class configSetUp:
             self.sfno = raw_config['sfno']
         if "cnn" in raw_config:
             self.cnn = raw_config['cnn']
+        if "unet" in raw_config:
+            self.unet = raw_config['unet']
+        if "gnn" in raw_config:
+            self.gnn = raw_config['gnn']
+
         self.nepochs = raw_config['nepochs']
 
     def get_nlags(self):
@@ -115,9 +123,10 @@ class configSetUp:
             raise RuntimeError(f"The method name must be 'lags' or 'autoregressive', but you specified {method}")
         return method
 
-    def set_channels(self, input_channels, output_channels):
+    def set_channels(self, input_channels, output_channels, diag_channels):
         self.input_channels = input_channels
         self.output_channels = output_channels
+        self.diag_channels = diag_channels
 
     def set_grid_size(self, nlat, nlon):
         self.nlat = nlat

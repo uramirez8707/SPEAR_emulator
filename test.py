@@ -31,6 +31,7 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
     input_names = config.input_channels
     target_names = config.outputs
     dynamics_variables = config.dynamics
+    diagnostic_variables = config.diagnostics_only
 
     nlags = config.get_nlags()
     method = config.get_data_load_method()
@@ -38,6 +39,7 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
     logger.info(f"Input channels {input_names}")
     logger.info(f"Targets {target_names}")
     logger.info(f"Dynamic variables {dynamics_variables}")
+    logger.info(f"Diagnostic variables {diagnostic_variables}")
 
     y_means = model.y_means
     y_stds = model.y_stds
@@ -61,7 +63,6 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 
             if method == "autoregressive":
                 y_step = y_batch[:, 0, target_indices_in_y, ...]
-                logger.debug(f"y_step: {y_step[:,:,:,1]}")
             else:
                 y_step = y_batch
 
@@ -81,6 +82,11 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 
                     for i, target_name in enumerate(target_names):
                         base_name = target_name.split('(')[0]
+
+                        if base_name in diagnostic_variables:
+                            logger.debug(f"Skipping {target_name} because it is a diagnostic only")
+                            continue
+
                         idx_in_x = next(j for j, name in enumerate(input_names) if name.startswith(base_name))
                         logger.debug(f"--- x_next[:, {idx_in_x}, :, :] = past_pred[:, {i}, :, :]")
                         x_next[:, idx_in_x, :, :] = past_pred[:, i, :, :]
@@ -104,6 +110,10 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
             if step > 100:
                 break
 
+            if step == 1:
+                logger.debug("Turning off debug logs")
+                logger.setLevel(logging.INFO)
+
     start_idx = config.get_nlags()
     end_idx = start_idx + len(predictions)
     rollout_dates = testing.times[start_idx : end_idx]
@@ -115,11 +125,11 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 def test_model(config, label, fig_dir, working_dir):
     training, validating, testing  = get_dataloaders(config)
 
-    input_channels, out_channels = get_updated_channels(config)
-    config.set_channels(input_channels, out_channels)
+    input_channels, out_channels, diag_channels = get_updated_channels(config)
+    config.set_channels(input_channels, out_channels, diag_channels)
     config.set_grid(training)
 
-    checkpoint_path = f"{working_dir}/output/{label}/checkpoints/epoch=49-step=18300.ckpt"
+    checkpoint_path = f"{working_dir}/output/{label}/checkpoints/last.ckpt"
     logger.info(f"Getting checkpoint from: {checkpoint_path}")
 
     # Set up the correct class
@@ -133,7 +143,7 @@ def test_model(config, label, fig_dir, working_dir):
     model.shapes_logged = True
 
     # Plot the training/validation losses
-    log_file = f"{working_dir}/output/lightning_logs/{label}/metrics.csv"
+    log_file = f"{working_dir}/output/{label}/logs/version_0/metrics.csv"
     output_file = f"{fig_dir}/losses.{label}.png"
     plot_loss(log_file,
               fig_dir=fig_dir,
@@ -160,6 +170,8 @@ def test_model(config, label, fig_dir, working_dir):
     return output
 
 ##################################3
+
+logger.setLevel(logging.DEBUG)
 
 working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run2"
 
