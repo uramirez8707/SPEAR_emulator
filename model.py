@@ -100,6 +100,7 @@ class SpearEmulator(L.LightningModule):
         self.output_channels = config.output_channels
         self.dynamic_channels = config.dynamics
         self.shapes_logged = False
+        self.optimizer_config = config.optimizer
 
     def forward(self, x):
         # Normalize the targets
@@ -183,7 +184,32 @@ class SpearEmulator(L.LightningModule):
         return self.do_the_training(x, y, "val")
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+
+        if self.optimizer_config is None:
+            raise RuntimeError("Optimizer is not defined in the configuration")
+
+        if self.optimizer_config['name'] == "Adam":
+            optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=lr,
+            )
+        elif self.optimizer_config['name'] == "AdamW":
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=lr,
+            )
+        elif self.optimizer_config['name'] == "SGD":
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=lr,
+                momentum=self.config.momentum,
+            )
+        else:
+            raise RuntimeError(f"Optimizer name is not supported: {self.optimizer_config['name']}")
+
+        self._logger.debug(f"Using optimizer: {optimizer}")
+
+        return optimizer
 
     def return_x_with_coordinates(self, x):
 

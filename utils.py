@@ -91,6 +91,7 @@ class configSetUp:
             self.gnn = raw_config['gnn']
 
         self.nepochs = raw_config['nepochs']
+        self.optimizer = raw_config.get("optimizer")
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)
