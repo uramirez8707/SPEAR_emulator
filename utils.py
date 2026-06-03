@@ -40,6 +40,7 @@ class FortranTracker(Callback):
               f"Val Loss: {val_loss} | "
               f"Peak VRAM: {max_mem_gb:.2f} GB <<<")
 
+
 class configSetUp:
     def __init__(self, config_yaml):
 
@@ -53,21 +54,7 @@ class configSetUp:
         self.testing = f"{self.input_dir}/{path['testing']}"
 
         self.set_variable_config(raw_config['variables'])
-        self.inputs = [
-            var for var, info in self.var_config.items() if info.get('is_input')
-        ]
-        self.outputs = [
-            var for var, info in self.var_config.items() if info.get('is_output')
-        ]
-        self.statics = [
-            var for var, info in self.var_config.items() if info.get('is_static') and info.get('is_input')
-        ]
-        self.dynamics = [
-            var for var, info in self.var_config.items() if not info.get('is_static') and info.get('is_input')
-        ]
-        self.diagnostics_only = [
-            var for var, info in self.var_config.items() if info.get('diagnostic_only')
-        ]
+        self.define_variable_type()
 
         self.batch_size = raw_config['batch_size']
         self.precision = raw_config.get('precision', 'bf16-mixed')
@@ -90,6 +77,23 @@ class configSetUp:
 
         self.nepochs = raw_config['nepochs']
         self.optimizer = raw_config.get("optimizer")
+
+    def define_variable_type(self):
+        self.inputs = [
+            var for var, info in self.var_config.items() if info.get('is_input')
+        ]
+        self.outputs = [
+            var for var, info in self.var_config.items() if info.get('is_output')
+        ]
+        self.statics = [
+            var for var, info in self.var_config.items() if info.get('is_static') and info.get('is_input')
+        ]
+        self.dynamics = [
+            var for var, info in self.var_config.items() if not info.get('is_static') and info.get('is_input')
+        ]
+        self.diagnostics_only = [
+            var for var, info in self.var_config.items() if info.get('diagnostic_only')
+        ]
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)
@@ -204,9 +208,6 @@ class configSetUp:
             return years[0], years[1]
         else:
             raise RuntimeError(f"Could not parse {label} years. Expected YYYY-YYYY but got {string}")
-
-    def get_cnn_filters(self):
-        return tuple(self.cnn['filters'])
 
     def dump_info(self):
         pass

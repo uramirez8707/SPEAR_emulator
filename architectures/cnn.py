@@ -63,41 +63,61 @@ def construct_model(in_channels, out_channels, filters):
 
     return model
 
+
+def get_activation_function(config):
+    activation_function = config.cnn['activation_function']
+    if activation_function == "relu":
+        return nn.ReLU(inplace=True)
+
+    elif activation_function == "leaky_relu":
+        return nn.LeakyReLU(
+            negative_slope=config.cnn.get("negative_slope", 0.01),
+            inplace=True
+        )
+
+    elif activation_function == "gelu":
+        return nn.GELU()
+
+    else:
+        raise ValueError(
+            f"Unsupported activation function: {activation_function}"
+        )
+
 def construct_model_better_padding(in_channels, out_channels, config):
     layers = []
-    filters = config.get_cnn_filters()
 
     # Encoder
     prev_channel = in_channels
-    for f in filters[:-1]:
+    filters = config.cnn['encoder']['filters']
+    for f in filters:
         layers.extend([
             GlobalGridPad2d(padding=1),
             nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=0),
             nn.BatchNorm2d(f),
-            nn.ReLU(),
+            get_activation_function(config),
         ])
         prev_channel = f
 
     # Bottleneck
-    bottleneck_channels = filters[-1]
-    layers.extend([
-        GlobalGridPad2d(padding=1),
-        nn.Conv2d(prev_channel, bottleneck_channels, kernel_size=3, padding=0),
-        nn.BatchNorm2d(bottleneck_channels),
-        nn.ReLU(inplace=True)
-    ])
+    filters = config.cnn['bottleneck']['filters']
+    for f in filters:
+        layers.extend([
+            GlobalGridPad2d(padding=1),
+            nn.Conv2d(prev_channel, f, kernel_size=3, padding=0),
+            nn.BatchNorm2d(f),
+            get_activation_function(config)
+        ])
+        prev_channel = f
 
     # Decoder
-    reversed_filters = list(reversed(filters[:-1]))
-    prev_channel = bottleneck_channels
-
-    for i, f in enumerate(reversed_filters):
+    filters = config.cnn['decoder']['filters']
+    for f in filters:
         layers.extend([
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
             GlobalGridPad2d(padding=1),
             nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=0),
             nn.BatchNorm2d(f),
-            nn.ReLU(inplace=True)
+            get_activation_function(config)
         ])
         prev_channel = f
 
