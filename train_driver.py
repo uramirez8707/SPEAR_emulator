@@ -63,6 +63,16 @@ def train_model(config, label, working_dir):
     print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
 
 working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run3"
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
-train_model(config, "autoregressive_nsteps_3_padding", working_dir)
+
+# Test with encoder/decoder CNN
+config = configSetUp(config_yaml=f"{working_dir}/config_cnn.yaml")
+train_model(config, "autoregressive_cnn", working_dir)
+
+# Test with SFNO
+config = configSetUp(config_yaml=f"{working_dir}/config_sfno.yaml")
+train_model(config, "autoregressive_sfno", working_dir)
+
+# Test with UNet
+config = configSetUp(config_yaml=f"{working_dir}/config_unet.yaml")
+train_model(config, "autoregressive_unet", working_dir)
 
