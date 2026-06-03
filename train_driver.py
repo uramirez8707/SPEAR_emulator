@@ -62,34 +62,7 @@ def train_model(config, label, working_dir):
 
     print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
 
-#working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/dev"
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_sfno.yaml")
-#train_model(config, "autoregressive_nsteps_3_sfno", working_dir)
-
-#config = configSetUp(config_yaml="examples/config_default.yaml")
-#train_model(config, "nlag_3")
-#
-#print("------------------------------------------")
-#print("------------------------------------------")
-#
-#config = configSetUp(config_yaml="examples/config_residual.yaml")
-#train_model(config, "residual_nlag_3")
-#
-#print("------------------------------------------")
-#print("------------------------------------------")
-#
-
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run3"
-
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_sfno.yaml")
-#train_model(config, "autoregressive_nsteps_3_sfno", working_dir)
-
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
-#train_model(config, "autoregressive_nsteps_3_padding", working_dir)
-
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_unet.yaml")
-#train_model(config, "autoregressive_nsteps_3_unet", working_dir)
-
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_gnn.yaml")
+working_dir = "/home/Uriel.Ramirez/SPEAR_emulator/RUNS"
+config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
 train_model(config, "autoregressive_nsteps_3_gnn", working_dir)
 

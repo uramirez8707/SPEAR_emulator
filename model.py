@@ -78,8 +78,6 @@ class SpearEmulator(L.LightningModule):
         other_inputs = self.setup_coordinate_channels(config)
         input_dim += len(other_inputs)
 
-        self.learning_rate = config.learning_rate
-
         self.target_names = config.outputs
         self.setup_area_weights(config)
         self.setup_target_weights(config)
@@ -184,25 +182,27 @@ class SpearEmulator(L.LightningModule):
         return self.do_the_training(x, y, "val")
 
     def configure_optimizers(self):
-
         if self.optimizer_config is None:
             raise RuntimeError("Optimizer is not defined in the configuration")
 
         if self.optimizer_config['name'] == "Adam":
             optimizer = torch.optim.Adam(
                 self.parameters(),
-                lr=lr,
+                lr=self.optimizer_config['learning_rate'],
+                weight_decay=self.optimizer_config['weight_decay']
             )
         elif self.optimizer_config['name'] == "AdamW":
             optimizer = torch.optim.AdamW(
                 self.parameters(),
-                lr=lr,
+                lr=self.optimizer_config['learning_rate'],
+                weight_decay=self.optimizer_config['weight_decay']
             )
         elif self.optimizer_config['name'] == "SGD":
             optimizer = torch.optim.SGD(
                 self.parameters(),
-                lr=lr,
-                momentum=self.config.momentum,
+                lr=self.optimizer_config['learning_rate'],
+                momentum=self.optimizer_config['momentum'],
+                weight_decay=self.optimizer_config['weight_decay']
             )
         else:
             raise RuntimeError(f"Optimizer name is not supported: {self.optimizer_config['name']}")
@@ -277,11 +277,6 @@ class SpearEmulator(L.LightningModule):
 
         self._logger.info(f"Model architecture \n"
                       f"{self.model}")
-
-        self._logger.info(f"Hyperparameters: \n"
-                      f"    Batch_size: {config.batch_size} \n"
-                      f"    Learning Rate: {config.learning_rate}"
-                )
 
     def setup_coordinate_channels(self, config):
         """

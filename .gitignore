@@ -6,3 +6,5 @@ logs/
 *recipe*
 *.zarr*
 *slurm*
+RUNS/
+DATA/

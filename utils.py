@@ -69,10 +69,8 @@ class configSetUp:
             var for var, info in self.var_config.items() if info.get('diagnostic_only')
         ]
 
-        hyperparameters = raw_config['hyperparameters']
-        self.batch_size = hyperparameters['batch_size']
-        self.learning_rate = hyperparameters['learning_rate']
-        self.precision = hyperparameters.get('precision', 'bf16-mixed')
+        self.batch_size = raw_config['batch_size']
+        self.precision = raw_config.get('precision', 'bf16-mixed')
 
         self.data_config = raw_config['data_config']
 
