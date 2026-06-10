@@ -79,21 +79,31 @@ class configSetUp:
         self.optimizer = raw_config.get("optimizer")
 
     def define_variable_type(self):
-        self.inputs = [
-            var for var, info in self.var_config.items() if info.get('is_input')
-        ]
-        self.outputs = [
-            var for var, info in self.var_config.items() if info.get('is_output')
-        ]
-        self.statics = [
-            var for var, info in self.var_config.items() if info.get('is_static') and info.get('is_input')
-        ]
-        self.dynamics = [
-            var for var, info in self.var_config.items() if not info.get('is_static') and info.get('is_input')
-        ]
-        self.diagnostics_only = [
-            var for var, info in self.var_config.items() if info.get('diagnostic_only')
-        ]
+
+        self.inputs = []
+        self.outputs = []
+        self.statics = []
+        self.dynamics = []
+        self.all_vars = []
+
+        for var, info in self.var_config.items():
+            var_type = info['variable_type']
+            self.all_vars.append(var)
+            if var_type == "prognostic":
+                self.inputs.append(var)
+                self.outputs.append(var)
+                self.dynamics.append(var)
+            elif var_type == "diagnostic":
+                self.outputs.append(var)
+                self.dynamics.append(var)
+            elif var_type == "forcing":
+                self.inputs.append(var)
+                self.dynamics.append(var)
+            elif var_type =="forcing-static":
+                self.inputs.append(var)
+                self.statics.append(var)
+            else:
+                raise RuntimeError(f"The variable_type {var_type} for {var} is not recognized")
 
     def get_nlags(self):
         return self.data_config["method"].get("nlags", 1)
@@ -126,10 +136,9 @@ class configSetUp:
             raise RuntimeError(f"The method name must be 'lags' or 'autoregressive', but you specified {method}")
         return method
 
-    def set_channels(self, input_channels, output_channels, diag_channels):
+    def set_channels(self, input_channels, output_channels):
         self.input_channels = input_channels
         self.output_channels = output_channels
-        self.diag_channels = diag_channels
 
     def set_grid_size(self, nlat, nlon):
         self.nlat = nlat

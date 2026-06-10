@@ -5,13 +5,15 @@ from utils import configSetUp, FortranTracker
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 import os
+import click
 
 def train_model(config, label, working_dir):
     config.dump_info()
 
     training, validating, testing  = get_dataloaders(config)
-    input_channels, out_channels, diag_channels = get_updated_channels(config)
-    config.set_channels(input_channels, out_channels, diag_channels)
+    input_channels, out_channels = get_updated_channels(config)
+
+    config.set_channels(input_channels, out_channels)
     config.set_grid(training)
 
     L.seed_everything(config.seed, workers=True, verbose=False)
@@ -48,31 +50,34 @@ def train_model(config, label, working_dir):
         precision=config.precision
     )
 
-#    resume_ckpt = last_ckpt_path if os.path.exists(last_ckpt_path) else None
-#
-#    if resume_ckpt:
-#        print(f"Resuming training from checkpoint: {resume_ckpt}")
-#
-#    trainer.fit(
-#        model=SPEAR,
-#        train_dataloaders=training.tensor,
-#        val_dataloaders=validating.tensor,
-#        ckpt_path=resume_ckpt
-#    )
-#
+    resume_ckpt = last_ckpt_path if os.path.exists(last_ckpt_path) else None
+
+    if resume_ckpt:
+        print(f"Resuming training from checkpoint: {resume_ckpt}")
+
+    trainer.fit(
+        model=SPEAR,
+        train_dataloaders=training.tensor,
+        val_dataloaders=validating.tensor,
+        ckpt_path=resume_ckpt
+    )
+
     print("ALL ABOARD THE CHU-CHU-SPEAR-TRAIN!")
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run3"
 
-# Test with encoder/decoder CNN
-config = configSetUp(config_yaml=f"{working_dir}/config_cnn.yaml")
-train_model(config, "autoregressive_cnn", working_dir)
+@click.command()
+@click.option('--working_dir', required=True, type=str, help='Base working directory for jobs')
+@click.option('--yaml_name', required=True, type=str, help='Name of the YAML config file')
+@click.option('--label', required=True, type=str, help='Label for the training run')
+def cli(working_dir, yaml_name, label):
+    # Construct the full path to the YAML file
+    config_path = os.path.join(working_dir, yaml_name)
 
-# Test with SFNO
-config = configSetUp(config_yaml=f"{working_dir}/config_sfno.yaml")
-train_model(config, "autoregressive_sfno", working_dir)
+    # Initialize config and run training
+    config = configSetUp(config_yaml=config_path)
+    train_model(config, label, working_dir)
 
-# Test with UNet
-config = configSetUp(config_yaml=f"{working_dir}/config_unet.yaml")
-train_model(config, "autoregressive_unet", working_dir)
+
+if __name__ == "__main__":
+    cli()
 

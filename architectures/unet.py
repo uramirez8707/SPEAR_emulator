@@ -1,32 +1,34 @@
 import torch
 import torch.nn as nn
+from architectures.cnn import GlobalGridPad2d, get_activation_function
 
 class DoubleConv(nn.Module):
     """ Defines a double convolution block used in the UNet architecture. """
-    def __init__(self, in_channels, out_channels, use_batchnorm=False):
+    def __init__(self, in_channels, out_channels, config):
         super().__init__()
+        use_batchnorm = config.unet['use_batchnorm']
         if use_batchnorm:
             self.double_conv = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
                 nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True),
+                get_activation_function(config.unet),
                 nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
                 nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True)
+                get_activation_function(config.unet)
             )
         else:
             self.double_conv = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-                nn.ReLU(inplace=True),
+                get_activation_function(config.unet),
                 nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-                nn.ReLU(inplace=True)
+                get_activation_function(config.unet)
             )
 
     def forward(self, x):
         return self.double_conv(x)
 
 class UNetModel(nn.Module):
-    def __init__(self, in_channels, out_channels, features=[64, 128, 256], use_batchnorm=False):
+    def __init__(self, config, in_channels, out_channels):
         super().__init__()
 
         self.downs = nn.ModuleList()
@@ -35,18 +37,18 @@ class UNetModel(nn.Module):
 
         # --- Encoder (Downsampling) ---
         # Loops through the features list to build downward layers
+        encoder_layers = config.unet['encoder']['filters']
         curr_in = in_channels
-        for feature in features:
-            self.downs.append(DoubleConv(curr_in, feature, use_batchnorm))
+        for feature in encoder_layers:
+            self.downs.append(DoubleConv(curr_in, feature, config))
             curr_in = feature
 
         # --- Decoder (Upsampling) ---
-        # Iterate backwards to match the encoder layers
-        reversed_features = list(reversed(features))
-
-        for i in range(len(reversed_features) - 1):
-            in_feat = reversed_features[i]      # e.g., 256
-            out_feat = reversed_features[i+1]   # e.g., 128
+        # Loops through the features list to build upward layers
+        decoder_layers = config.unet['decoder']['filters']
+        for i in range(len(decoder_layers) - 1):
+            in_feat = decoder_layers[i]      # e.g., 256
+            out_feat = decoder_layers[i+1]   # e.g., 128
 
             # Upsampling layer
             self.ups.append(
@@ -54,11 +56,11 @@ class UNetModel(nn.Module):
             )
             # Double convolution after concatenating skip connections
             self.ups.append(
-                DoubleConv(in_feat, out_feat, use_batchnorm)
+                DoubleConv(in_feat, out_feat, config)
             )
 
         # Last layer maps the final feature size (e.g., 64) back to target channels
-        self.out_layer = nn.Conv2d(features[0], out_channels, kernel_size=1)
+        self.out_layer = nn.Conv2d(encoder_layers[0], out_channels, kernel_size=1)
 
     def forward(self, x):
         skip_connections = []
@@ -97,10 +99,4 @@ class UNetModel(nn.Module):
         return self.out_layer(x)
 
 def construct_unet_model(config, input_dim, output_dim):
-    """
-    Factory function to build the UNet. 
-    Checks the config for a use_batchnorm flag, defaulting to False.
-    """
-    use_batchnorm = getattr(config.unet, 'use_batchnorm', False)
-
-    return UNetModel(in_channels=input_dim, out_channels=output_dim, use_batchnorm=use_batchnorm)
+    return UNetModel(config=config, in_channels=input_dim, out_channels=output_dim)

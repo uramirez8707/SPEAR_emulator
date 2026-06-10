@@ -65,13 +65,13 @@ def construct_model(in_channels, out_channels, filters):
 
 
 def get_activation_function(config):
-    activation_function = config.cnn['activation_function']
+    activation_function = config['activation_function']
     if activation_function == "relu":
         return nn.ReLU(inplace=True)
 
     elif activation_function == "leaky_relu":
         return nn.LeakyReLU(
-            negative_slope=config.cnn.get("negative_slope", 0.01),
+            negative_slope=config.get("negative_slope", 0.01),
             inplace=True
         )
 
@@ -87,16 +87,23 @@ def construct_model_better_padding(in_channels, out_channels, config):
     layers = []
 
     # Encoder
+    h = config.nlat
+    w = config.nlon
+    map_sizes = []
+
     prev_channel = in_channels
     filters = config.cnn['encoder']['filters']
     for f in filters:
+        map_sizes.append((h, w))
         layers.extend([
             GlobalGridPad2d(padding=1),
             nn.Conv2d(prev_channel, f, kernel_size=3, stride=2, padding=0),
             nn.BatchNorm2d(f),
-            get_activation_function(config),
+            get_activation_function(config.cnn),
         ])
         prev_channel = f
+        h = h // 2
+        w = w // 2
 
     # Bottleneck
     filters = config.cnn['bottleneck']['filters']
@@ -105,19 +112,20 @@ def construct_model_better_padding(in_channels, out_channels, config):
             GlobalGridPad2d(padding=1),
             nn.Conv2d(prev_channel, f, kernel_size=3, padding=0),
             nn.BatchNorm2d(f),
-            get_activation_function(config)
+            get_activation_function(config.cnn)
         ])
         prev_channel = f
 
     # Decoder
     filters = config.cnn['decoder']['filters']
-    for f in filters:
+    map_sizes = list(reversed(map_sizes))
+    for i, f in enumerate(filters):
         layers.extend([
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            nn.Upsample(size=map_sizes[i], mode='bilinear', align_corners=False),
             GlobalGridPad2d(padding=1),
             nn.Conv2d(prev_channel, f, kernel_size=3, stride=1, padding=0),
             nn.BatchNorm2d(f),
-            get_activation_function(config)
+            get_activation_function(config.cnn)
         ])
         prev_channel = f
 

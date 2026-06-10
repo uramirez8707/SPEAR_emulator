@@ -28,7 +28,10 @@ def get_statistics(config, channel_type="input"):
 
     for channel_name in channels:
         raw_var_name = channel_name.split('(')[0]
-        var_idx = config.inputs.index(raw_var_name)
+
+        # Config.all_vars has all the variables in the order that they are in the
+        # database and in the order of config.means and config.stds
+        var_idx = config.all_vars.index(raw_var_name)
 
         mean = 0.
         stds = 1
@@ -42,6 +45,7 @@ def get_statistics(config, channel_type="input"):
     means_tensor = torch.tensor(expanded_means, dtype=torch.float32).view(1, -1, 1, 1)
     stds_tensor = torch.tensor(expanded_stds, dtype=torch.float32).view(1, -1, 1, 1)
 
+    # This is just returting the means/stds of all the variables (inputs or outputs)
     return means_tensor, stds_tensor
 
 class NormalizeMe(nn.Module):
@@ -88,10 +92,9 @@ class SpearEmulator(L.LightningModule):
         if other_inputs is not None:
             self._logger.info("- Other input channels:\n    " + "\n    ".join(other_inputs))
 
-        self.diag_channels = config.diag_channels
-        self._logger.info("- Diagnostics only: \n       " + "\n    ".join(self.diag_channels))
         self.log_output_channels(config)
 
+        self.setup_input_indices_in_x(config)
         self.setup_residual_indices(config)
 
         self.input_channels = config.input_channels
@@ -100,7 +103,7 @@ class SpearEmulator(L.LightningModule):
         self.shapes_logged = False
         self.optimizer_config = config.optimizer
 
-    def forward(self, x):
+    def forward(self, x, x_all):
         # Normalize the targets
         if not self.shapes_logged:
             self._logger.debug("Normalizing x")
@@ -117,10 +120,12 @@ class SpearEmulator(L.LightningModule):
         cnn_out =  self.model(x_norm)
         if self.use_residual:
             if not self.shapes_logged:
-                self._logger.debug(f"Adding x_norm[:, {self.residual_indices}, :, :] to the model prediction")
+                self._logger.debug(f"Adding x_all[:, {self.residual_indices}, :, :] to the model prediction")
 
-            # Get the value of each target at (t-1)
-            t_minus_one = x_norm[:, self.residual_indices, :, :]
+            # Get the value of each ouput at (t-1) from x_all which has all of the data at t-1
+            t_minus_one = x_all[:, self.residual_indices, :, :]
+            t_minus_one = (t_minus_one - self.y_means) / self.y_stds
+
             cnn_out = cnn_out + t_minus_one
 
         return cnn_out
@@ -264,7 +269,7 @@ class SpearEmulator(L.LightningModule):
         if config.model_type == "default":
             filters = (16, 32, 32)
             self.model = construct_model(input_dim, output_dim, filters)
-        elif config.model_type == "cnn-padding":
+        elif config.model_type == "cnn":
             self.model = construct_model_better_padding(input_dim, output_dim, config)
         elif config.model_type == "sfno":
             self.model = construct_sfno_model(config, input_dim, output_dim, self._logger)
@@ -316,6 +321,17 @@ class SpearEmulator(L.LightningModule):
         self._logger.debug(f"Coordinates channels have the shape: {list(coords.shape)}")
         return channels
 
+    def setup_input_indices_in_x(self, config):
+        inputs = config.input_channels
+        all_vars = config.all_vars
+        indices = []
+        for variable in inputs:
+            var = variable.split("(")[0]
+            indices.append(all_vars.index(var))
+
+        indices_tensor = torch.tensor(indices, dtype=torch.long)
+        self.register_buffer("input_indices", indices_tensor)
+
     def setup_residual_indices(self, config):
         self.use_residual = config.use_residual
 
@@ -329,12 +345,11 @@ class SpearEmulator(L.LightningModule):
                       "   y(t) = Δy + y(t-1)")
         temp_indices = []
         targets = config.outputs
-        inputs = config.input_channels
+        inputs = config.all_vars
         for target in targets:
-            var = f"{target}(t-1)"
-            if var in inputs:
-                idx = inputs.index(var)
-                self._logger.debug(f"The index {idx} of X maps to {var}")
+            if target in inputs:
+                idx = inputs.index(target)
+                self._logger.debug(f"The index {idx} of X maps to {target}(t-1)")
                 temp_indices.append(idx)
             else:
                 raise ValueError(f"Could not find {var} in {inputs} for residual connection!")
@@ -383,8 +398,12 @@ class AutoregressiveSpearEmulator(SpearEmulator):
 
     def training_step(self, batch, batch_idx):
         x, y_sequence = batch
+
         if not self.shapes_logged:
+            # X includes all of the inputs + diagnostics at t-1
             self._logger.debug(f"Shape of orignal x: {x.shape}")
+
+            # Y includes just the outputs at t, t+1, ...  t+nlags-1
             self._logger.debug(f"Shape of orignal y: {y_sequence.shape}")
 
         nsteps = y_sequence.shape[1]
@@ -418,8 +437,12 @@ class AutoregressiveSpearEmulator(SpearEmulator):
     def get_loss(self, x, y_sequence, nsteps):
         x = x.squeeze(2)
         x = x.view(x.size(0), x.size(1), self.nlat, self.nlon)
+
+        x_original = x
+        x = x[:, self.input_indices, ...]
         if not self.shapes_logged:
-            self._logger.debug(f"Shape of reshaped x: {x.shape}")
+            self._logger.debug(f"Shape of reshaped x original: {x_original.shape}")
+            self._logger.debug(f"Shape of reshaped x inputs: {x.shape}")
             self._logger.debug(f"Shape of y_sequence: {y_sequence.shape}")
 
         current_x = x
@@ -448,7 +471,7 @@ class AutoregressiveSpearEmulator(SpearEmulator):
             y_norm = (y_step_target - self.y_means) / self.y_stds
 
             # Make the prediction
-            preds_norm = self(current_x)
+            preds_norm = self(current_x, x_original)
             if not self.shapes_logged:
                  self._logger.debug(f"step: {step} - shape of prediction: {preds_norm.shape}")
 
@@ -470,34 +493,42 @@ class AutoregressiveSpearEmulator(SpearEmulator):
             # Update the outputs with the predictions
             next_x = current_x.clone()
 
-            for i, output in enumerate(self.output_channels):
-              # Skip diagnostics ...
-              if output in self.diag_channels:
-                    continue
-              idx_in_x = self.find_input_channel_index(output)
-              if not self.shapes_logged:
-                 self._logger.debug(f"step: {step} - replacing {output} "
-                                    f"next_x[:, {idx_in_x}, ...] = preds[:, {i}, ...]")
+            for i, input_var in enumerate(self.input_channels):
+                idx_in_pred = self.find_output_channel_index(input_var)
 
-              next_x[:, idx_in_x, ...] = preds[:, i, ...]
+                if idx_in_pred:
+                    if not self.shapes_logged:
+                        self._logger.debug(f"step: {step} - replacing {input_var} "
+                                        f"next_x[:, {i}, ...] = preds[:, {idx_in_pred}, ...]")
 
-            # Update the diagnostic variables with the next actual values
-            for i, diag_var in enumerate(self.diag_channels):
-                idx_in_x = self.find_input_channel_index(diag_var)
-                idx_in_y = self.output_channels.index(diag_var)
+                    next_x[:, i, ...] = preds[:, idx_in_pred, ...]
 
-                if not self.shapes_logged:
-                    self._logger.debug(f"step: {step} - replacing {diag_var} "
-                                       f"next_x[:, {idx_in_x}, ...] = y_step_all[:, {idx_in_y}, ...]")
-                next_x[:, idx_in_x, ...] = y_step_all[:, idx_in_y, ...]
+                else:
+                    idx_in_pred = self.find_dynamic_channel_index(input_var)
+
+                    if not idx_in_pred:
+                        if not self.shapes_logged:
+                            self._logger.debug(f"step: {step} - not replacing {input_var} it is a static variable")
+                        continue
+
+                    if not self.shapes_logged:
+                        self._logger.debug(f"step: {step} - replacing {input_var} "
+                                        f"next_x[:, {i}, ...] = y_step_all[:, {idx_in_pred}, ...]")
+                    next_x[:, i, ...] = y_step_all[:, idx_in_pred, ...]
             current_x = next_x
 
         self.shapes_logged = True
         return total_global_mse, total_per_target_mse
 
-    def find_input_channel_index(self, target):
-        var_name = target.replace("(t)", "")
-        for i, input_var in enumerate(self.input_channels):
-            if var_name in input_var:
+    def find_output_channel_index(self, target):
+        var_name = target.replace("(t-1)", "")
+        for i, output_var in enumerate(self.output_channels):
+            if var_name in output_var:
+                return i
+
+    def find_dynamic_channel_index(self, target):
+        var_name = target.replace("(t-1)", "")
+        for i, dynamic_var in enumerate(self.dynamic_channels):
+            if var_name in dynamic_var:
                 return i
 

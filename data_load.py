@@ -15,15 +15,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class SPEARAutoregressiveDataset(Dataset):
-    def __init__(self, anemoi_dataset, dynamic_vars, static_vars, output_vars, nsteps=2):
+    def __init__(self, anemoi_dataset, config):
         self.dataset = anemoi_dataset
-        self.nsteps = nsteps
+        self.nsteps = config.get_nregressive_steps()
 
         all_vars = list(self.dataset.variables)
 
-        self.dyn_indices = [all_vars.index(v) for v in dynamic_vars]
-        self.stat_indices = [all_vars.index(v) for v in static_vars]
-        self.out_indices = [all_vars.index(v) for v in output_vars]
+        self.in_indices = [all_vars.index(v) for v in config.inputs]
+        self.dyn_indices = [all_vars.index(v) for v in config.dynamics]
 
     def __len__(self):
         return len(self.dataset) - self.nsteps
@@ -31,14 +30,11 @@ class SPEARAutoregressiveDataset(Dataset):
     def __getitem__(self, idx):
         frame_np = self.dataset[idx]
         frame = torch.tensor(frame_np, dtype=torch.float32)
-        channels = []
 
-        for var_idx in self.dyn_indices:
-            channels.append(frame[var_idx:var_idx+1, ...])
-
-        for stat_idx in self.stat_indices:
-            channels.append(frame[stat_idx:stat_idx+1, ...])
-        x = torch.cat(channels, dim=0)
+        # Have x contain all the variables including the outputs
+        # The values at t-1 for the diagnostics are needed so that
+        # they can be added to the model prediction
+        x = frame[...]
 
         y_sequence = []
         for step in range(1, self.nsteps + 1):
@@ -52,6 +48,8 @@ class SPEARAutoregressiveDataset(Dataset):
 
 class SPEARLaggedDataset(Dataset):
     def __init__(self, anemoi_dataset, dynamic_vars, static_vars, output_vars, nlags=3):
+
+        raise RuntimeError("SPEARLaggedDataset is no longer supported correctly ... sorry")
         self.dataset = anemoi_dataset
         self.nlags = nlags
         
@@ -107,28 +105,17 @@ class SPEARDataStore():
 
 def get_updated_channels(config):
     nlags = config.get_nlags()
-    dynamics = config.dynamics
-    statics = config.statics
-    diags = config.diagnostics_only
 
     in_channels = []
-    for var in dynamics:
+    for var in config.inputs:
         for lag in range(1, nlags + 1):
             in_channels.append(f"{var}(t-{lag})")
-
-    # Static variables (no lags)
-    for var in statics:
-        in_channels.append(var)
 
     out_channels = []
     for var in config.outputs:
         out_channels.append(f"{var}(t)")
 
-    diag_channels = []
-    for var in diags:
-        diag_channels.append(f"{var}(t)")
-
-    return in_channels, out_channels, diag_channels
+    return in_channels, out_channels
 
 def split_data_set(config, dataset):
     data_type = config.data_config.get("type") # "residual" or "default"
@@ -148,14 +135,10 @@ def split_data_set(config, dataset):
                     nlags=nlags
                 )
     elif method == "autoregressive":
-        nsteps = config.get_nregressive_steps()
-        logger.info(f"Setting up the data to use {nsteps} {method} steps during training \n")
+        logger.info(f"Setting up the data to use {config.get_nregressive_steps()} {method} steps during training \n")
         return SPEARAutoregressiveDataset(
             anemoi_dataset=dataset,
-            dynamic_vars=config.dynamics,
-            static_vars=config.statics,
-            output_vars=config.outputs,
-            nsteps=nsteps
+            config=config
         )
 
 def get_tensor(config:configSetUp, dataset, mode):
@@ -187,8 +170,8 @@ def get_dataloaders(config:configSetUp):
         logger.setLevel(logging.DEBUG)
 
     logger.info(f"Getting the training dataset from file: {config.training}")
-    training = open_dataset(config.training, select=config.inputs)
-    if sorted(list(training.variables)) != sorted(config.inputs):
+    training = open_dataset(config.training, select=config.all_vars)
+    if list(training.variables) != config.all_vars:
         raise RuntimeError(f"Expected inputs and the dataset variables do not match the variables available in the dataset..."
                            f"\n---> Expected inputs: {config.inputs}"
                            f"\n---> Variables available: {list(training.variables)}")
@@ -199,10 +182,6 @@ def get_dataloaders(config:configSetUp):
         len(np.unique(training.longitudes))
     )
     logger.debug(f"Grid size {config.nlon}x{config.nlat}")
-
-    # Determine the variables available in the dataset
-    config.inputs = list(training.variables)
-    logger.debug(f"Variables: {config.inputs}")
 
     # Set up the normalization method
     config.set_normalization_info(
@@ -220,14 +199,14 @@ def get_dataloaders(config:configSetUp):
 
     # Construct validation dataset
     logger.info(f"Getting the validating dataset from file: {config.validating}")
-    validating = open_dataset(config.validating, select=config.inputs)
+    validating = open_dataset(config.validating, select=config.all_vars)
     log_dataset_info(logger, "Validating", validating)
     validating_tensor = get_tensor(config, validating, "validating")
     validating_set = SPEARDataStore(validating_tensor, validating)
 
     # Construct testing dataset
     logger.info(f"Getting the testing dataset from file: {config.testing}")
-    testing = open_dataset(config.testing, select=config.inputs)
+    testing = open_dataset(config.testing, select=config.all_vars)
     log_dataset_info(logger, "Testing", testing)
     testing_tensor = get_tensor(config, testing, "testing")
     testing_set = SPEARDataStore(testing_tensor, testing)
