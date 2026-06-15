@@ -15,6 +15,7 @@ dependencies:
   - numpy>=1.26,<2
   - scipy
   - pandas
+  - seaborn
   - xarray
   - netcdf4
   - dask

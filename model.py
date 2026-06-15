@@ -9,6 +9,7 @@ from architectures.snfo import construct_sfno_model
 from architectures.cnn import construct_model, construct_model_better_padding
 from architectures.unet import construct_unet_model
 from architectures.gnn import construct_gnn_model
+from utils import get_indices
 
 logging.basicConfig(
     level=logging.INFO,
@@ -324,10 +325,7 @@ class SpearEmulator(L.LightningModule):
     def setup_input_indices_in_x(self, config):
         inputs = config.input_channels
         all_vars = config.all_vars
-        indices = []
-        for variable in inputs:
-            var = variable.split("(")[0]
-            indices.append(all_vars.index(var))
+        indices = get_indices(inputs, all_vars)
 
         indices_tensor = torch.tensor(indices, dtype=torch.long)
         self.register_buffer("input_indices", indices_tensor)
@@ -495,8 +493,7 @@ class AutoregressiveSpearEmulator(SpearEmulator):
 
             for i, input_var in enumerate(self.input_channels):
                 idx_in_pred = self.find_output_channel_index(input_var)
-
-                if idx_in_pred:
+                if idx_in_pred >= 0 :
                     if not self.shapes_logged:
                         self._logger.debug(f"step: {step} - replacing {input_var} "
                                         f"next_x[:, {i}, ...] = preds[:, {idx_in_pred}, ...]")
@@ -506,7 +503,7 @@ class AutoregressiveSpearEmulator(SpearEmulator):
                 else:
                     idx_in_pred = self.find_dynamic_channel_index(input_var)
 
-                    if not idx_in_pred:
+                    if idx_in_pred == -1:
                         if not self.shapes_logged:
                             self._logger.debug(f"step: {step} - not replacing {input_var} it is a static variable")
                         continue
@@ -525,10 +522,10 @@ class AutoregressiveSpearEmulator(SpearEmulator):
         for i, output_var in enumerate(self.output_channels):
             if var_name in output_var:
                 return i
-
+        return -1
     def find_dynamic_channel_index(self, target):
         var_name = target.replace("(t-1)", "")
         for i, dynamic_var in enumerate(self.dynamic_channels):
             if var_name in dynamic_var:
                 return i
-
+        return -1

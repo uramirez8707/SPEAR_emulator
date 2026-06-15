@@ -6,6 +6,7 @@ import gc
 import yaml
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import re
 
 class OutputData:
     def __init__(self, model_label, predictions, ground_truth,
@@ -24,8 +25,6 @@ class OutputData:
         self.working_dir = working_dir
         self.add_variable_metadata()
 
-        print(self.metadata)
-
     def add_variable_metadata(self):
         metadata_path = f"{self.working_dir}/metadata.yaml"
 
@@ -33,8 +32,7 @@ class OutputData:
             self.metadata = yaml.safe_load(f)
 
     def get_variable_units(self, variable):
-        variable = variable.rsplit("_", 1)[0]
-        print(f"Getting the units for {variable}")
+        variable = re.sub(r'_\d+$', '', variable)
         for item in self.metadata:
             if variable in item["variable"]:
                 return item["units"]
@@ -132,6 +130,8 @@ class ModelResults:
             self.plot_scatter_pred_vs_actual(var, config)
 
     def plot_RMSE(self, target):
+        units = self.models[0].get_variable_units(target)
+        print(f"Plotting the temporal evolution for {target} with units: {units}")
         regions = {
             'Global': (-90, 90),
             'Tropics': (-20, 20),
@@ -143,9 +143,6 @@ class ModelResults:
         model_names = []
         regional_rmses = {region: [] for region in regions.keys()}
         for model in self.models:
-            print(f"Working on {model.model_label}")
-            print(len(model.predictions))
-
             model_names.append(model.model_label)
             target_index = model.find_target_index(target)
 
@@ -184,7 +181,7 @@ class ModelResults:
                 ax.bar_label(rects, padding=3, fmt='%.3f', fontweight='bold')
 
         ax.set_ylabel('RMSE')
-        ax.set_title(f'Regional RMSE — {target}', fontsize=14)
+        ax.set_title(f'Area-weighted RMSE\n{target} [{units}]', fontsize=14)
         ax.set_xticks(x)
         ax.set_xticklabels(regions.keys())
         ax.legend(loc='upper left')
@@ -206,7 +203,8 @@ class ModelResults:
         if num_models == 1:
             axes = [axes]
 
-        all_y_values = []
+        ymin = []
+        ymax = []
         for i, model in enumerate(self.models):
             ax = axes[i]
 
@@ -232,8 +230,8 @@ class ModelResults:
             lower_bound = pred_time_series_mean - rmse_time_series
             upper_bound = pred_time_series_mean + rmse_time_series
 
-            all_y_values.extend([np.min(lower_bound), np.max(upper_bound),
-                                 np.min(truth_time_series_mean), np.max(truth_time_series_mean)])
+            ymin.append(np.min(lower_bound))
+            ymax.append(np.max(upper_bound))
 
             slope, intercept, _, _, _ = linregress(time_indices, pred_time_series_mean)
 
@@ -264,6 +262,8 @@ class ModelResults:
 
             del preds, truths, preds_flat, truths_flat, sq_errors
             gc.collect()
+        for ax in axes:
+            ax.set_ylim(min(ymin), max(ymax))
 
         filename = f"{self.fig_dir}/temporal_evolution.{target}.png"
         plt.savefig(filename, dpi=300)
@@ -281,6 +281,8 @@ class ModelResults:
         if num_models == 1:
             axes = [axes]
 
+        lower_bounds = []
+        upper_bounds = []
         for i, model in enumerate(self.models):
             ax = axes[i]
 
@@ -303,14 +305,17 @@ class ModelResults:
             correlation_matrix = np.corrcoef(truths_sub, preds_sub)
             r_squared = correlation_matrix[0, 1] ** 2
 
+            lower_bounds.append(np.min([truths_sub, preds_sub]))
+            upper_bounds.append(np.max([truths_sub, preds_sub]))
+
             ax.scatter(truths_sub, preds_sub, c='tab:blue', alpha=0.9, edgecolors='none')
 
             min_val = min(np.nanmin(truths_sub), np.nanmin(preds_sub))
             max_val = max(np.nanmax(truths_sub), np.nanmax(preds_sub))
             ax.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--')
 
-            ax.set_title(f'{target}: y_pred vs y_actual for {model.model_label} Model', fontsize=12)
-            ax.set_ylabel(f'Predicted {target} ({units})')
+            ax.set_title(f'Model: {model.model_label} \n{target} - y_pred vs y_actual', fontsize=12)
+            ax.set_ylabel(f'Predicted {target} [{units}]')
             ax.grid(alpha=0.3)
 
             textstr = f'$R^2$ = {r_squared:.2f}'
@@ -323,6 +328,9 @@ class ModelResults:
 
             del preds, truths, preds_flat, truths_flat
             gc.collect()
+
+            for ax in axes:
+                ax.set_ylim(min(lower_bounds), max(upper_bounds))
 
         filename = f"{self.fig_dir}/scatter_comparison.{target}.png"
         plt.savefig(filename, dpi=300)

@@ -1,10 +1,10 @@
 from model import SpearEmulator, AutoregressiveSpearEmulator
 from data_load import get_dataloaders, get_updated_channels
-from utils import configSetUp
+from utils import configSetUp, get_indices
 import torch
 from output import OutputData, ModelResults
 from pathlib import Path
-from plotting_utils import plot_loss
+from plotting_utils import plot_loss_heat_map, plot_loss
 import logging
 
 logging.basicConfig(
@@ -29,26 +29,17 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
     logger.info(f"\n ------------------------------- \n🏃 Starting rollout on {device}...")
 
     input_names = config.input_channels
+    all_vars = config.all_vars
+    indices = get_indices(input_names, all_vars)
+
     target_names = config.outputs
     dynamics_variables = config.dynamics
-    diagnostic_variables = config.diagnostics_only
 
     nlags = config.get_nlags()
     method = config.get_data_load_method()
 
-    logger.info(f"Input channels {input_names}")
-    logger.info(f"Targets {target_names}")
-    logger.info(f"Dynamic variables {dynamics_variables}")
-    logger.info(f"Diagnostic variables {diagnostic_variables}")
-
     y_means = model.y_means
     y_stds = model.y_stds
-    logger.debug(
-        "Mean and stds used for normalizing\n"
-        f"Means:\n{y_means.cpu().numpy()}\n\n"
-        f"Stds:\n{y_stds.cpu().numpy()}"
-    )
-    mappings = config.get_mappings()
 
     # y_batch has dimensions (nsamples, nlags, ndynamicvariables, nensembles, npoints)
     # target_indices_y corresponds to the indices of ndynamicvariables for the output variables only
@@ -68,10 +59,19 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 
             logger.debug(f"y step shape {y_step.shape}")
 
+            # x_batch contains all of the variables, so get only the acutal_inputs
+            x = x_batch.squeeze(2)
+            x = x.view(x.size(0), x.size(1), config.nlat, config.nlon)
+
+            # All of the data at time (t-1), including the diagnostics
+            x_all = x
+
+            x = x[:, indices, :, :]
+            logger.debug(f"x shape {x.shape} (inputs only!)")
+
             # Reshape to the format expected by the model
-            x = x_batch.to(device).squeeze(2).view(-1, len(input_names), config.nlat, config.nlon)
             y = y_step.to(device).squeeze(2).view(-1, len(target_names), config.nlat, config.nlon)
-            logger.debug(f"x shape {x.shape} - y shape {y.shape}")
+            logger.debug(f"y shape {y.shape}")
 
             logger.debug(f"Working on step {step}")
             if step > 0:
@@ -80,17 +80,17 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
                 if method == "autoregressive":
                     past_pred = physical_preds_buffer[-1]
 
-                    for i, target_name in enumerate(target_names):
-                        base_name = target_name.split('(')[0]
-
-                        if base_name in diagnostic_variables:
-                            logger.debug(f"Skipping {target_name} because it is a diagnostic only")
-                            continue
-
-                        idx_in_x = next(j for j, name in enumerate(input_names) if name.startswith(base_name))
-                        logger.debug(f"--- x_next[:, {idx_in_x}, :, :] = past_pred[:, {i}, :, :]")
-                        x_next[:, idx_in_x, :, :] = past_pred[:, i, :, :]
+                    for i, input_var in enumerate(input_names):
+                        base_name = input_var.split('(')[0]
+                        logger.debug(f"Working on ... {base_name}")
+                        for j, output in enumerate(target_names):
+                            base_out = output.split('(')[0]
+                            if base_name == base_out:
+                                logger.debug(f"--- {base_name}: x_next[:, {i}, :, :] = past_pred[:, {j}, :, :]")
+                                x_next[:, i, :, :] = past_pred[:, j, :, :]
+                                break
                 else:
+                    raise RuntimeError("This is no longer supported --- sorry!")
                     for target_idx, target_name in enumerate(target_names):
                         target_lag_indx = get_variable_mappings(mappings, target_name)
                         for past_pred_phys in reversed(physical_preds_buffer):
@@ -99,7 +99,7 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 
                 x = x_next
 
-            preds_norm = model(x)
+            preds_norm = model(x, x_all)
             preds_physical = (preds_norm * y_stds) + y_means
             physical_preds_buffer.append(preds_physical.clone())
             if len(physical_preds_buffer) > nlags:
@@ -124,9 +124,9 @@ def do_forecast_rollout(label, model, testing, config, device, working_dir, fig_
 
 def test_model(config, label, fig_dir, working_dir):
     training, validating, testing  = get_dataloaders(config)
+    input_channels, out_channels = get_updated_channels(config)
 
-    input_channels, out_channels, diag_channels = get_updated_channels(config)
-    config.set_channels(input_channels, out_channels, diag_channels)
+    config.set_channels(input_channels, out_channels)
     config.set_grid(training)
 
     checkpoint_path = f"{working_dir}/output/{label}/checkpoints/last.ckpt"
@@ -143,9 +143,15 @@ def test_model(config, label, fig_dir, working_dir):
     model.shapes_logged = True
 
     # Plot the training/validation losses
-    log_file = f"{working_dir}/output/{label}/logs/version_0/metrics.csv"
+    logs_dir = Path(working_dir) / "output" / label / "logs"
+    version_dirs = [d for d in logs_dir.glob("version_*") if d.is_dir()]
+    latest_version = max(
+        version_dirs,
+        key=lambda p: int(p.name.split("_")[1])
+    )
+    log_file = latest_version / "metrics.csv"
     output_file = f"{fig_dir}/losses.{label}.png"
-    plot_loss(log_file,
+    plot_loss_heat_map(log_file,
               fig_dir=fig_dir,
               label=label,
               output_channels=config.outputs)
@@ -162,6 +168,8 @@ def test_model(config, label, fig_dir, working_dir):
     output = do_forecast_rollout(label, model, testing, config, device,
              working_dir, fig_dir)
 
+    print("Finished with the rollout ... ")
+
     # Plot spatial plots
     variables = config.outputs
     for var in variables:
@@ -173,23 +181,19 @@ def test_model(config, label, fig_dir, working_dir):
 
 logger.setLevel(logging.DEBUG)
 
-working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/run2"
+working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/architecture_comparison"
 
 fig_dir = Path(f"{working_dir}/output/figs")
 fig_dir.mkdir(parents=True, exist_ok=True)
 
 Results = ModelResults(fig_dir)
 
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive.yaml")
-#output = test_model(config, "autoregressive_nsteps_3", fig_dir, working_dir)
-#Results.add_model(output)
-
-config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_padding.yaml")
-output = test_model(config, "autoregressive_nsteps_3_padding", fig_dir, working_dir)
+config = configSetUp(config_yaml=f"{working_dir}/config_cnn-1.yaml")
+output = test_model(config, "cnn-candidate-1", fig_dir, working_dir)
 Results.add_model(output)
 
-#config = configSetUp(config_yaml=f"{working_dir}/config_autoregressive_sfno.yaml")
-#output = test_model(config, "autoregressive_nsteps_3_sfno", fig_dir, working_dir)
-#Results.add_model(output)
+config = configSetUp(config_yaml=f"{working_dir}/config_cnn-2.yaml")
+output = test_model(config, "cnn-candidate-2", fig_dir, working_dir)
+Results.add_model(output)
 
 Results.create_var_plots(config)

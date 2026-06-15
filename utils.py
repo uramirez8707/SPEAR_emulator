@@ -220,3 +220,11 @@ class configSetUp:
 
     def dump_info(self):
         pass
+
+def get_indices(inputs, all_vars):
+    indices = []
+    for variable in inputs:
+        var = variable.split("(")[0]
+        indices.append(all_vars.index(var))
+
+    return indices

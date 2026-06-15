@@ -8,9 +8,10 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --mem=128G
 #SBATCH --time=06:00:00
-#SBATCH --job-name=SPEAR_UNET_EMULATOR
+#SBATCH --job-name=SPEAR_UNET_EMULATOR-1
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=uriel.ramirez@noaa.gov
+#SBATCH --output=logs/SPEAR_UNET_EMULATOR-1.%j
 
 module load rdhpcs-conda/25.11.0
 conda activate /scratch4/GFDL/gfdlscr/Uriel.Ramirez/conda/envs/WUT4
@@ -20,8 +21,8 @@ export LD_LIBRARY_PATH=${CONDA_PREFIX}/lib
 cd /scratch4/GFDL/gfdlscr/Uriel.Ramirez/DEV/LIGHTING
 echo $LD_LIBRARY_PATH
 
-WORKING_DIR="/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/MODEL-BASELINES"
-YAML_NAME="config_unet.yaml"
+WORKING_DIR="/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/architecture_comparison"
+YAML_NAME="config_unet-1.yaml"
 LABEL="unet-candidate-1"
 
 mkdir -p "${WORKING_DIR}"
@@ -29,7 +30,7 @@ cat <<EOF > "${WORKING_DIR}/${YAML_NAME}"
 verbose: True
 seed: 42
 model_type: "unet"
-nepochs: 50
+nepochs: 10
 
 unet:
   use_batchnorm: true
@@ -59,7 +60,7 @@ data_config:
     name: "autoregressive"      # "lags" or "autoregressive"
     nsteps: 3
 
-use_coordinates: False
+use_coordinates: True
 
 variables:
   air_temperature_at_two_meters:
