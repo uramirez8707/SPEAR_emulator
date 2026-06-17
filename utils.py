@@ -77,6 +77,7 @@ class configSetUp:
 
         self.nepochs = raw_config['nepochs']
         self.optimizer = raw_config.get("optimizer")
+        self.accumulate_grad_batches = raw_config.get("accumulate_grad_batches")
 
     def define_variable_type(self):
 

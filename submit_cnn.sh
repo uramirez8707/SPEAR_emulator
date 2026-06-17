@@ -105,17 +105,17 @@ variables:
 
   PRATEsfc:
     variable_type: "diagnostic"
-    target_weight: 1.0
+    target_weight: 0.6
     normalization: "z-score"
 
   PRESsfc:
-    variable_type: "diagnostic"
+    variable_type: "prognostic"
     target_weight: 1.0
     normalization: "z-score"
 
   SHTFLsfc:
     variable_type: "diagnostic"
-    target_weight: 1.0
+    target_weight: 0.6
     normalization: "z-score"
 
   ULWRFsfc:
@@ -135,7 +135,7 @@ variables:
 
   USWRFtoa:
     variable_type: "diagnostic"
-    target_weight: 1.0
+    target_weight: 0.6
     normalization: "z-score"
 
   surface_evaporation_rate:
@@ -144,7 +144,7 @@ variables:
     normalization: "z-score"
 
   surface_temperature:
-    variable_type: "diagnostic"
+    variable_type: "prognostic"
     target_weight: 1.0
     normalization: "z-score"
 

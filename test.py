@@ -183,17 +183,52 @@ logger.setLevel(logging.DEBUG)
 
 working_dir = "/scratch4/GFDL/gfdlscr/Uriel.Ramirez/SPEAR_TRAINING_JOBS/architecture_comparison"
 
-fig_dir = Path(f"{working_dir}/output/figs")
-fig_dir.mkdir(parents=True, exist_ok=True)
+run_cnn = True
+run_unet = True
+run_sfno = True
+if run_cnn:
+    fig_dir = Path(f"{working_dir}/output/figs_cnn")
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    Results_cnn = ModelResults(fig_dir)
 
-Results = ModelResults(fig_dir)
+    config = configSetUp(config_yaml=f"{working_dir}/config_cnn-1.yaml")
+    output = test_model(config, "cnn-candidate-1", fig_dir, working_dir)
+    Results_cnn.add_model(output)
 
-config = configSetUp(config_yaml=f"{working_dir}/config_cnn-1.yaml")
-output = test_model(config, "cnn-candidate-1", fig_dir, working_dir)
-Results.add_model(output)
+    config = configSetUp(config_yaml=f"{working_dir}/config_cnn-2.yaml")
+    output = test_model(config, "cnn-candidate-2", fig_dir, working_dir)
+    Results_cnn.add_model(output)
 
-config = configSetUp(config_yaml=f"{working_dir}/config_cnn-2.yaml")
-output = test_model(config, "cnn-candidate-2", fig_dir, working_dir)
-Results.add_model(output)
+    Results_cnn.create_var_plots(config)
 
-Results.create_var_plots(config)
+if run_unet:
+    fig_dir = Path(f"{working_dir}/output/figs_unet")
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    Results_unet = ModelResults(fig_dir)
+
+    config = configSetUp(config_yaml=f"{working_dir}/config_unet-1.yaml")
+    output = test_model(config, "unet-candidate-1", fig_dir, working_dir)
+    Results_unet.add_model(output)
+
+    config = configSetUp(config_yaml=f"{working_dir}/config_unet-2.yaml")
+    output = test_model(config, "unet-candidate-2", fig_dir, working_dir)
+    Results_unet.add_model(output)
+
+    Results_unet.create_var_plots(config)
+
+if run_sfno:
+    fig_dir = Path(f"{working_dir}/output/figs_sfno")
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    Results_sfno = ModelResults(fig_dir)
+
+    config = configSetUp(config_yaml=f"{working_dir}/config_sfno-1.yaml")
+    output = test_model(config, "sfno-candidate-1", fig_dir, working_dir)
+    Results_sfno.add_model(output)
+
+    config = configSetUp(config_yaml=f"{working_dir}/config_sfno-2.yaml")
+    output = test_model(config, "sfno-candidate-2", fig_dir, working_dir)
+    Results_sfno.add_model(output)
+
+    Results_sfno.create_var_plots(config)
+
+

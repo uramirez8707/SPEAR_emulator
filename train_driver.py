@@ -36,19 +36,35 @@ def train_model(config, label, working_dir):
     else:
         SPEAR = SpearEmulator(config)
 
-    trainer = L.Trainer(
-        max_epochs=config.nepochs,
-        logger=logger,
-        callbacks=[
-            checkpoint_callback,
-            FortranTracker()
-            ],
-        accelerator="auto",
-        devices=1,
-        deterministic=True,
-        benchmark=False,
-        precision=config.precision
-    )
+    if config.accumulate_grad_batches:
+        trainer = L.Trainer(
+            max_epochs=config.nepochs,
+            logger=logger,
+            callbacks=[
+                checkpoint_callback,
+                FortranTracker()
+                ],
+            accelerator="auto",
+            devices=1,
+            deterministic=True,
+            benchmark=False,
+            precision=config.precision,
+            accumulate_grad_batches=config.accumulate_grad_batches
+        )
+    else:
+        trainer = L.Trainer(
+            max_epochs=config.nepochs,
+            logger=logger,
+            callbacks=[
+                checkpoint_callback,
+                FortranTracker()
+                ],
+            accelerator="auto",
+            devices=1,
+            deterministic=True,
+            benchmark=False,
+            precision=config.precision
+        )
 
     resume_ckpt = last_ckpt_path if os.path.exists(last_ckpt_path) else None
 

@@ -79,13 +79,13 @@ class OutputData:
 
         im1 = axes[0, 1].pcolormesh(lons, lats, pred_start, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[0, 1].set_title(f'Prediction (t={self.times[0]})')
-        
+
         cbar1 = fig.colorbar(im1, ax=axes[0, :2], orientation='vertical', fraction=0.02, pad=0.04)
         cbar1.set_label(f"[{units}]")
 
         im2 = axes[0, 2].pcolormesh(lons, lats, diff_start, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto', transform=ccrs.PlateCarree())
         axes[0, 2].set_title('Difference (Pred - Truth)')
-        
+
         cbar2 = fig.colorbar(im2, ax=axes[0, 2], orientation='vertical', fraction=0.046, pad=0.04)
         cbar2.set_label(f"Diff [{units}]")
 
@@ -94,13 +94,13 @@ class OutputData:
 
         im4 = axes[1, 1].pcolormesh(lons, lats, pred_end, cmap='viridis', vmin=global_vmin, vmax=global_vmax, shading='auto', transform=ccrs.PlateCarree())
         axes[1, 1].set_title(f'Prediction (t={self.times[-1]})')
-        
+
         cbar3 = fig.colorbar(im4, ax=axes[1, :2], orientation='vertical', fraction=0.02, pad=0.04)
         cbar3.set_label(f"[{units}]")
 
         im5 = axes[1, 2].pcolormesh(lons, lats, diff_end, cmap='RdBu_r', vmin=-global_max_diff, vmax=global_max_diff, shading='auto', transform=ccrs.PlateCarree())
         axes[1, 2].set_title('Difference (Pred - Truth)')
-        
+
         cbar4 = fig.colorbar(im5, ax=axes[1, 2], orientation='vertical', fraction=0.046, pad=0.04)
         cbar4.set_label(f"Diff [{units}]")
 
@@ -124,14 +124,94 @@ class ModelResults:
 
     def create_var_plots(self, config):
         variables = config.outputs
+        RMSE_data = []
         for var in variables:
-            self.plot_RMSE(var)
+            RMSE, model_names = self.plot_RMSE(var)
+            var_data = {"var_name": var, "RMSE": RMSE, "models":model_names}
+            RMSE_data.append(var_data)
             self.plot_temporal_evolution(var, config)
             self.plot_scatter_pred_vs_actual(var, config)
 
+        self.plot_RMSE_scorecard(RMSE_data)
+
+    def plot_RMSE_scorecard(self, RMSE_data):
+        out_data, model_names = self.construct_RMSE_scorecard(RMSE_data)
+        parsed_data = {}
+        variables = []
+        regions = []
+
+        for item in out_data:
+            for key, winner_idx in item.items():
+                var_name, region = key.rsplit('-', 1)
+
+                if var_name not in variables:
+                    variables.append(var_name)
+                if region not in regions:
+                    regions.append(region)
+
+                parsed_data[(var_name, region)] = winner_idx
+
+        grid = np.zeros((len(variables), len(regions)))
+
+        for i, var in enumerate(variables):
+            for j, reg in enumerate(regions):
+                grid[i, j] = parsed_data.get((var, reg), -1)
+
+        fig_height = max(8, len(variables) * 0.35)
+        fig, ax = plt.subplots(figsize=(12, fig_height), layout='constrained')
+
+        num_models = len(model_names)
+        cmap = plt.get_cmap('Pastel1', num_models)
+
+        cax = ax.imshow(grid, cmap=cmap, aspect='auto')
+
+        ax.set_xticks(np.arange(len(regions)))
+        ax.set_yticks(np.arange(len(variables)))
+        ax.set_xticklabels(regions, fontsize=11, fontweight='bold')
+        ax.set_yticklabels(variables, fontsize=10)
+        ax.xaxis.set_ticks_position('top')
+
+        win_counts = {name: 0 for name in model_names}
+        for i in range(len(variables)):
+            for j in range(len(regions)):
+                winner_idx = parsed_data.get((variables[i], regions[j]))
+                if winner_idx is not None and winner_idx != -1:
+                    winner_name = model_names[int(winner_idx)]
+
+                    win_counts[winner_name] += 1
+                    ax.text(j, i, winner_name,
+                            ha="center", va="center", color="black", fontsize=9)
+
+        ax.set_title("Winning Model (Lowest RMSE)", pad=30, fontsize=16, fontweight='bold')
+
+        filename = f"{self.fig_dir}/rmse_scorecard.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved scorecard to {filename}")
+
+        if win_counts:
+            overall_winner = max(win_counts, key=win_counts.get)
+            max_wins = win_counts[overall_winner]
+
+            # You can print this out, or add it to your plot as a title/caption!
+            print(f"Overall Winner: {overall_winner} with {max_wins} wins.")
+            print(f"Full Leaderboard: {win_counts}")
+
+    def construct_RMSE_scorecard(self, RMSE_data):
+        out_data = []
+        for var_data in RMSE_data:
+            var_rmse = var_data['RMSE']
+            model_names = var_data['models']
+            for region, values in var_rmse.items():
+                values_arrays = np.array(values)
+                winning_model = np.argmin(values_arrays)
+                out_data.append({f"{var_data['var_name']}-{region}": winning_model})
+
+        return out_data, model_names
+
     def plot_RMSE(self, target):
         units = self.models[0].get_variable_units(target)
-        print(f"Plotting the temporal evolution for {target} with units: {units}")
+        print(f"Plotting the area weighted RMSE for {target} with units: {units}")
         regions = {
             'Global': (-90, 90),
             'Tropics': (-20, 20),
@@ -142,6 +222,7 @@ class ModelResults:
 
         model_names = []
         regional_rmses = {region: [] for region in regions.keys()}
+        var_out = []
         for model in self.models:
             model_names.append(model.model_label)
             target_index = model.find_target_index(target)
@@ -169,16 +250,18 @@ class ModelResults:
 
                 regional_rmses[region_name].append(rmse)
 
-            x = np.arange(len(regions))
-            num_models = len(self.models)
-            width = 0.8 / num_models
+        x = np.arange(len(regions))
+        num_models = len(self.models)
+        width = 0.8 / num_models
 
-            fig, ax = plt.subplots(figsize=(14, 7), layout='constrained')
-            for i, model_name in enumerate(model_names):
-                rmses_for_this_model = [regional_rmses[reg][i] for reg in regions.keys()]
-                offset = (i - num_models / 2 + 0.5) * width
-                rects = ax.bar(x + offset, rmses_for_this_model, width, label=model_name)
-                ax.bar_label(rects, padding=3, fmt='%.3f', fontweight='bold')
+        fig, ax = plt.subplots(figsize=(14, 7), layout='constrained')
+
+        # Loop to create grouped side-by-side bars
+        for i, model_name in enumerate(model_names):
+            rmses_for_this_model = [regional_rmses[reg][i] for reg in regions.keys()]
+            offset = (i - num_models / 2 + 0.5) * width
+            rects = ax.bar(x + offset, rmses_for_this_model, width, label=model_name)
+            ax.bar_label(rects, padding=3, fmt='%.3f', fontweight='bold')
 
         ax.set_ylabel('RMSE')
         ax.set_title(f'Area-weighted RMSE\n{target} [{units}]', fontsize=14)
@@ -191,6 +274,7 @@ class ModelResults:
         filename = f"{self.fig_dir}/regional_rmse.{target}.png"
         plt.savefig(filename, dpi=300)
         plt.close(fig)
+        return regional_rmses, model_names
 
     def plot_temporal_evolution(self, target, config:configSetUp):
 
