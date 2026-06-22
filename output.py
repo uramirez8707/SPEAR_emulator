@@ -46,7 +46,7 @@ class OutputData:
         self.working_dir = working_dir
         self.add_variable_metadata()
 
-    def load_data(self, output_data):
+    def load_output(self, output_data):
         print(f"Loading data from {output_data}")
         data = np.load(output_data, allow_pickle=True)
 
@@ -63,7 +63,6 @@ class OutputData:
         self.working_dir = data['working_dir']
 
         self.add_variable_metadata()
-        ds.close()
 
     def add_variable_metadata(self):
         metadata_path = f"{self.working_dir}/metadata.yaml"
@@ -459,3 +458,125 @@ class ModelResults:
         filename = f"{self.fig_dir}/scatter_comparison.{target}.png"
         plt.savefig(filename, dpi=300)
         plt.close(fig)
+
+    def get_target_results(self, target, time_index=-1):
+        units = self.models[0].get_variable_units(target)
+        plotting_data = {}
+        labels = []
+        for i, model in enumerate(self.models):
+            target_index = model.find_target_index(target)
+            preds = model.predictions[time_index, :, target_index, :, :].squeeze()
+            plotting_data[f"Predictions-model_{i}"] = preds
+            labels.append(model.model_label)
+            if i == 0:
+                truths = model.ground_truth[time_index, :, target_index, :, :].squeeze()
+                plotting_data["truths"] = truths
+                time_label = model.times[time_index]
+                plotting_data["time"] = time_label
+                plotting_data["units"] = units
+
+        plotting_data['labels'] = labels
+        plotting_data['variable_name'] = target
+
+        return plotting_data
+
+    def plot_spatial_performance_comparison(self, var, plot_name_label):
+        var_data = self.get_target_results(var)
+        target = var_data['variable_name']
+        truths = var_data['truths']
+
+        pred1 = var_data['Predictions-model_0']
+        pred2 = var_data['Predictions-model_1']
+        time_val = var_data['time']
+        label = var_data['labels']
+        units = var_data['units']
+
+        diff1 = pred1 - truths
+        diff2 = pred2 - truths
+
+        proj = ccrs.PlateCarree()
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10), subplot_kw={'projection': proj})
+        data_extent = [0, 360, -90, 90]
+        
+        # Plot Truths
+        im0 = axes[0, 0].imshow(truths, cmap='viridis', extent=data_extent, transform=proj)
+        axes[0, 0].set_title('Ground Truth')
+        fig.colorbar(im0, ax=axes[0, 0], fraction=0.046, pad=0.04, label=f"[{units}]")
+        
+        # Plot Candidate 1
+        im1 = axes[0, 1].imshow(pred1, cmap='viridis', extent=data_extent, transform=proj)
+        axes[0, 1].set_title(f'Predictions - {label[0]}')
+        fig.colorbar(im1, ax=axes[0, 1], fraction=0.046, pad=0.04, label=f"[{units}]")
+        
+        # Plot Candidate 2
+        im2 = axes[0, 2].imshow(pred2, cmap='viridis', extent=data_extent, transform=proj)
+        axes[0, 2].set_title(f'Predictions - {label[1]}')
+        fig.colorbar(im2, ax=axes[0, 2], fraction=0.046, pad=0.04, label=f"[{units}]")
+        
+        axes[1, 0].axis('off')
+        vmax = max(np.max(np.abs(diff1)), np.max(np.abs(diff2)))
+
+        # Plot Difference 1
+        im3 = axes[1, 1].imshow(diff1, cmap='RdBu_r', vmin=-vmax, vmax=vmax, extent=data_extent, transform=proj)
+        axes[1, 1].set_title(f'Difference ({label[0]} - Truth)')
+        fig.colorbar(im3, ax=axes[1, 1], fraction=0.046, pad=0.04, label=f"[{units}]")
+        
+        # Plot Difference 2
+        im4 = axes[1, 2].imshow(diff2, cmap='RdBu_r', vmin=-vmax, vmax=vmax, extent=data_extent, transform=proj)
+        axes[1, 2].set_title(f'Difference ({label[1]} - Truth)')
+        fig.colorbar(im4, ax=axes[1, 2], fraction=0.046, pad=0.04, label=f"[{units}]")
+        
+        for ax in axes.flatten():
+            if ax.has_data():
+                ax.coastlines(color='black', linewidth=1)
+                ax.add_feature(cfeature.BORDERS, linestyle=':', color='black', alpha=0.7)
+        
+        fig.suptitle(f"Model Comparison for {target} \n {time_val}", fontsize=18)
+        
+        plt.tight_layout()
+
+        filename = f"{self.fig_dir}/{plot_name_label}.{target}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def plot_time_series_comparison(self, var, plot_name_label):
+        var_data = self.get_target_results(var, time_index=slice(0, -1))
+        target = var_data['variable_name']
+        truths = var_data['truths']
+        truths = np.average(var_data['truths'], axis=(1, 2))
+
+        pred1 =  np.average(var_data['Predictions-model_0'], axis=(1, 2))
+        pred2 =  np.average(var_data['Predictions-model_1'], axis=(1, 2))
+
+        time_val = var_data['time']
+        model_labels = var_data['labels']
+        units = var_data['units']
+
+        diff1 = pred1 - truths
+        diff2 = pred2 - truths
+
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+        axes[0].plot(time_val, truths, label='Truths', color='black', linewidth=2, linestyle='--', marker='o')
+        axes[0].plot(time_val, pred1, label=model_labels[0], color='tab:blue', alpha=0.8, marker='s')
+        axes[0].plot(time_val, pred2, label=model_labels[1], color='tab:orange', alpha=0.8, marker='d')
+
+        axes[0].set_title(f"Global Average Time Series: {plot_name_label}", fontsize=16)
+        axes[0].set_ylabel(f"{target}\n({units})")
+        axes[0].legend()
+        axes[0].grid(True, linestyle=':', alpha=0.6)
+
+        axes[1].axhline(0, color='black', linewidth=1, linestyle='--')
+        axes[1].plot(time_val, diff1, label=f"{model_labels[0]} Error", color='tab:blue', marker='s')
+        axes[1].plot(time_val, diff2, label=f"{model_labels[1]} Error", color='tab:orange', marker='d')
+
+        axes[1].set_ylabel(f"Difference\n({units})")
+        axes[1].set_xlabel("Time")
+        axes[1].legend()
+        axes[1].grid(True, linestyle=':', alpha=0.6)
+
+        plt.tight_layout()
+        plt.savefig(f"{self.fig_dir}/{plot_name_label}.{target}.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+
