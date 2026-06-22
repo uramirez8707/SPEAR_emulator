@@ -6,7 +6,7 @@ from output import OutputData, ModelResults
 from pathlib import Path
 from plotting_utils import plot_loss_heat_map, plot_loss
 import logging
-from inference import do_inference
+from inference import do_inference, load_output
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,7 +21,7 @@ def test_model(config, label, fig_dir, working_dir, data_dir):
 
     if output_data.exists():
         logger.info("Output already exists, loading it up")
-        output = load_output()
+        output = load_output(data_dir)
     else:
         logger.info("Output does not exists, generating ...")
         output = do_inference(config, label, working_dir, output_data, fig_dir)
