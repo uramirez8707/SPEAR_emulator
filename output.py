@@ -7,11 +7,32 @@ import yaml
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import re
+import xarray as xr
 
 class OutputData:
-    def __init__(self, model_label, predictions, ground_truth,
+    def __init__(self):
+        pass
+
+    def dump_output(self, model_label, predictions, ground_truth,
                  times, lattitudes, nlat, longitudes, nlon,
-                 output_targets, working_dir, fig_dir):
+                 output_targets, working_dir, fig_dir, output_data):
+
+        np.savez_compressed(
+            output_data,
+            model_label=model_label,
+            predictions=predictions,
+            ground_truth=ground_truth,
+            times=times,
+            lattitudes=lattitudes,
+            nlat=nlat,
+            longitudes=longitudes,
+            nlon=nlon,
+            output_targets=output_targets,
+            fig_dir=fig_dir,
+            working_dir=working_dir
+        )
+        print(f"Data successfully dumped to {output_data}")
+
         self.model_label = model_label
         self.times = times
         self.lattitudes = lattitudes
@@ -24,6 +45,25 @@ class OutputData:
         self.fig_dir = fig_dir
         self.working_dir = working_dir
         self.add_variable_metadata()
+
+    def load_data(self, output_data):
+        print(f"Loading data from {output_data}")
+        data = np.load(output_data, allow_pickle=True)
+
+        self.model_label = data['model_label']
+        self.times = data['times']
+        self.lattitudes = data['lattitudes']
+        self.nlat = data['nlat']
+        self.longitudes = data['longitudes']
+        self.nlon = data['nlon']
+        self.predictions = data['predictions']
+        self.ground_truth = data['ground_truth']
+        self.output_targets = data['output_targets']
+        self.fig_dir = data['fig_dir']
+        self.working_dir = data['working_dir']
+
+        self.add_variable_metadata()
+        ds.close()
 
     def add_variable_metadata(self):
         metadata_path = f"{self.working_dir}/metadata.yaml"
