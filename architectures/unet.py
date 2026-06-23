@@ -4,23 +4,24 @@ from architectures.cnn import GlobalGridPad2d, get_activation_function
 
 class DoubleConv(nn.Module):
     """ Defines a double convolution block used in the UNet architecture. """
-    def __init__(self, in_channels, out_channels, config):
+    def __init__(self, in_channels, out_channels, config, dilation):
         super().__init__()
         use_batchnorm = config.unet['use_batchnorm']
+        padding = dilation
         if use_batchnorm:
             self.double_conv = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation, bias=False),
                 nn.BatchNorm2d(out_channels),
                 get_activation_function(config.unet),
-                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation, bias=False),
                 nn.BatchNorm2d(out_channels),
                 get_activation_function(config.unet)
             )
         else:
             self.double_conv = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation),
                 get_activation_function(config.unet),
-                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation),
                 get_activation_function(config.unet)
             )
 
@@ -38,9 +39,13 @@ class UNetModel(nn.Module):
         # --- Encoder (Downsampling) ---
         # Loops through the features list to build downward layers
         encoder_layers = config.unet['encoder']['filters']
+        dilation_rates = config.unet['encoder'].get('dilation')
+        if not dilation_rates:
+            dilation_rates = [1] * len(encoder_layers)
+
         curr_in = in_channels
-        for feature in encoder_layers:
-            self.downs.append(DoubleConv(curr_in, feature, config))
+        for feature, d in zip(encoder_layers, dilation_rates):
+            self.downs.append(DoubleConv(curr_in, feature, config, dilation=d))
             curr_in = feature
 
         # --- Decoder (Upsampling) ---
@@ -56,7 +61,7 @@ class UNetModel(nn.Module):
             )
             # Double convolution after concatenating skip connections
             self.ups.append(
-                DoubleConv(in_feat, out_feat, config)
+                DoubleConv(in_feat, out_feat, config, dilation=1)
             )
 
         # Last layer maps the final feature size (e.g., 64) back to target channels

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torchmetrics.functional.image import structural_similarity_index_measure as ssim
 import pytorch_lightning as L
 import numpy as np
 import torch.optim as optim
@@ -103,6 +104,7 @@ class SpearEmulator(L.LightningModule):
         self.dynamic_channels = config.dynamics
         self.shapes_logged = False
         self.optimizer_config = config.optimizer
+        self.loss_function = config.loss_function
 
     def forward(self, x, x_all):
         # Normalize the targets
@@ -140,6 +142,15 @@ class SpearEmulator(L.LightningModule):
         self.register_buffer("y_stds", y_stds)
 
     def compute_weighted_loss(self, preds, y_norm):
+        if self.loss_function['name'] == "MSE":
+            return self.get_MSE_loss(preds, y_norm)
+        elif self.loss_function['name'] == "SSIM":
+            alpha = self.loss_function.get('alpha', 0.5)
+            return self.get_SSIM_loss(preds, y_norm, alpha)
+        else:
+            raise RuntimeError(f"The loss function {self.loss_function} has not been implemented")
+
+    def get_MSE_loss(self, preds, y_norm):
         sq_error = (preds - y_norm) ** 2
         weighted_sq_error = sq_error * self.area_weights * self.target_weights
 
@@ -147,6 +158,26 @@ class SpearEmulator(L.LightningModule):
         per_target_mse = weighted_sq_error.mean(dim=(0, 2, 3))
 
         return global_mse, per_target_mse
+
+    def get_SSIM_loss(self, preds, y_norm, alpha):
+
+        # This computes the MSE (Magnitude loss)
+        sq_error = (preds - y_norm) ** 2
+        weighted_sq_error = sq_error * self.area_weights * self.target_weights        
+        global_mse = weighted_sq_error.mean()
+        per_target_mse = weighted_sq_error.mean(dim=(0, 2, 3))
+
+        # This computes the SSIM (Structure loss)
+        data_range = y_norm.max() - y_norm.min()
+        _, ssim_map = ssim(preds, y_norm, data_range=data_range, return_full_image=True)
+        ssim_loss_map = 1.0 - ssim_map
+        weighted_ssim_loss = ssim_loss_map * self.area_weights * self.target_weights
+        global_ssim_loss = weighted_ssim_loss.mean()
+
+        # This combines the two losses
+        combined_loss = (alpha * global_mse) + ((1.0 - alpha) * global_ssim_loss)
+
+        return combined_loss, per_target_mse
 
     def do_the_training(self, x, y, label):
         x = x.squeeze(2)
