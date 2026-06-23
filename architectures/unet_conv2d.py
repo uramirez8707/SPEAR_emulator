@@ -28,13 +28,13 @@ class DoubleConv(nn.Module):
     def forward(self, x):
         return self.double_conv(x)
 
-class UNetModel(nn.Module):
+class UNetModel_conv2d(nn.Module):
     def __init__(self, config, in_channels, out_channels):
         super().__init__()
 
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.downsamples = nn.ModuleList()
 
         # --- Encoder (Downsampling) ---
         # Loops through the features list to build downward layers
@@ -44,9 +44,19 @@ class UNetModel(nn.Module):
             dilation_rates = [1] * len(encoder_layers)
 
         curr_in = in_channels
-        for feature, d in zip(encoder_layers, dilation_rates):
+        for i, (feature, d) in enumerate(zip(encoder_layers, dilation_rates)):
             self.downs.append(DoubleConv(curr_in, feature, config, dilation=d))
             curr_in = feature
+
+            # We need a downsample layer after every block EXCEPT the bottleneck
+            if i < len(encoder_layers) - 1:
+                self.downsamples.append(
+                    nn.Sequential(
+                        nn.Conv2d(in_channels=feature, out_channels=feature, kernel_size=3, stride=2, padding=1, bias=False),
+                        nn.BatchNorm2d(feature),
+                        get_activation_function(config.unet)
+                    )
+                )
 
         # --- Decoder (Upsampling) ---
         # Loops through the features list to build upward layers
@@ -75,7 +85,7 @@ class UNetModel(nn.Module):
         for i in range(len(self.downs) - 1):
             x = self.downs[i](x)
             skip_connections.append(x) # Save for skip connection
-            x = self.pool(x)
+            x = self.downsamples[i](x)
 
         # Bottleneck
         x = self.downs[-1](x)
@@ -102,10 +112,3 @@ class UNetModel(nn.Module):
             x = double_conv(x)
 
         return self.out_layer(x)
-
-def construct_unet_model(config, input_dim, output_dim):
-    downsampling_method = config.unet.get('downsampling', "max_pooling")
-    if downsampling_method == "conv2d":
-        from architectures.unet_conv2d import UNetModel_conv2d
-        return UNetModel_conv2d(config=config, in_channels=input_dim, out_channels=output_dim)
-    return UNetModel(config=config, in_channels=input_dim, out_channels=output_dim)
