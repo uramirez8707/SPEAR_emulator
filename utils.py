@@ -38,8 +38,12 @@ class FortranTracker(Callback):
         if isinstance(grad_norm, torch.Tensor):
             grad_norm = f"{grad_norm.item():.2f}"
 
+        current_lr = trainer.optimizers[0].param_groups[0]['lr']
+        lr_str = f"{current_lr:.2e}"
+
         print(f"\n>>> [Epoch {trainer.current_epoch}] "
               f"Time: {int(mins)}m {int(secs)}s | "
+              f"LR: {lr_str} | "
               f"Train Loss: {train_loss} | "
               f"Val Loss: {val_loss} | "
               f"Grad Norm: {grad_norm} | "

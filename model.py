@@ -246,6 +246,27 @@ class SpearEmulator(L.LightningModule):
 
         self._logger.debug(f"Using optimizer: {optimizer}")
 
+        if "scheduler" in self.optimizer_config:
+            scheduler_config = self.optimizer_config['scheduler']
+            factor = scheduler_config.get('factor', 0.5)
+            patience = scheduler_config.get('patience', 3)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode='min',
+                factor=factor,      # Drops the learning rate by factor
+                patience=patience,      # Waits for patience epochs of no improvement before dropping
+                min_lr=1e-6      # Safety net so the LR doesn't drop to absolute zero
+            )
+
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val_loss",
+                    "frequency": 1
+                }
+            }
+
         return optimizer
 
     def return_x_with_coordinates(self, x):
