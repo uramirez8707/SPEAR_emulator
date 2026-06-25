@@ -2,19 +2,37 @@ import torch
 import torch.nn as nn
 from architectures.cnn import GlobalGridPad2d, get_activation_function
 
+def get_normalization_function(config, out_channels):
+    normalization = config.unet['normalization']
+    norm_type = normalization['norm_type']
+    if norm_type == "batch":
+        return nn.BatchNorm2d(out_channels)
+    elif norm_type == "group":
+        ngroups = normalization['num_groups']
+        return nn.GroupNorm(num_groups=ngroups, num_channels=out_channels)
+
 class DoubleConv(nn.Module):
     """ Defines a double convolution block used in the UNet architecture. """
     def __init__(self, in_channels, out_channels, config, dilation):
         super().__init__()
-        use_batchnorm = config.unet['use_batchnorm']
+
+        use_normalization = False
+        if "use_batchnorm" in config.unet:
+            use_normalization = config.unet['use_batchnorm']
+            if use_normalization:
+                config.unet['normalization'] = {"norm_type": "batch"}
+
+        if "normalization" in config.unet:
+            use_normalization = True
+
         padding = dilation
-        if use_batchnorm:
+        if use_normalization:
             self.double_conv = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation, bias=False),
-                nn.BatchNorm2d(out_channels),
+                get_normalization_function(config, out_channels),
                 get_activation_function(config.unet),
                 nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=padding, dilation=dilation, bias=False),
-                nn.BatchNorm2d(out_channels),
+                get_normalization_function(config, out_channels),
                 get_activation_function(config.unet)
             )
         else:
@@ -53,7 +71,7 @@ class UNetModel_conv2d(nn.Module):
                 self.downsamples.append(
                     nn.Sequential(
                         nn.Conv2d(in_channels=feature, out_channels=feature, kernel_size=3, stride=2, padding=1, bias=False),
-                        nn.BatchNorm2d(feature),
+                        get_normalization_function(config, feature),
                         get_activation_function(config.unet)
                     )
                 )
