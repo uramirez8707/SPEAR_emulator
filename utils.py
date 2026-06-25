@@ -84,6 +84,7 @@ class configSetUp:
         self.optimizer = raw_config.get("optimizer")
         self.accumulate_grad_batches = raw_config.get("accumulate_grad_batches")
         self.loss_function = raw_config.get("loss_function", {"name": "MSE"})
+        self.gradient_clip_val = raw_config.get("gradient_clip_val", 0)
 
     def define_variable_type(self):
 

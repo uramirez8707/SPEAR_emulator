@@ -39,6 +39,7 @@ def train_model(config, label, working_dir):
     if config.accumulate_grad_batches:
         trainer = L.Trainer(
             max_epochs=config.nepochs,
+            gradient_clip_val=config.gradient_clip_val,
             logger=logger,
             callbacks=[
                 checkpoint_callback,
@@ -54,6 +55,7 @@ def train_model(config, label, working_dir):
     else:
         trainer = L.Trainer(
             max_epochs=config.nepochs,
+            gradient_clip_val=config.gradient_clip_val,
             logger=logger,
             callbacks=[
                 checkpoint_callback,
