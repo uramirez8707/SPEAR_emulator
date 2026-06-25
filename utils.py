@@ -34,10 +34,15 @@ class FortranTracker(Callback):
         if isinstance(val_loss, torch.Tensor):
             val_loss = f"{val_loss.item():.4f}"
 
+        grad_norm = trainer.callback_metrics.get('grad_norm', 'N/A')
+        if isinstance(grad_norm, torch.Tensor):
+            grad_norm = f"{grad_norm.item():.2f}"
+
         print(f"\n>>> [Epoch {trainer.current_epoch}] "
               f"Time: {int(mins)}m {int(secs)}s | "
               f"Train Loss: {train_loss} | "
               f"Val Loss: {val_loss} | "
+              f"Grad Norm: {grad_norm} | "
               f"Peak VRAM: {max_mem_gb:.2f} GB <<<")
 
 
