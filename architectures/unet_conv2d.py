@@ -79,14 +79,25 @@ class UNetModel_conv2d(nn.Module):
         # --- Decoder (Upsampling) ---
         # Loops through the features list to build upward layers
         decoder_layers = config.unet['decoder']['filters']
+        upsampling_mode = config.unet.get('upsampling', 'transpose')
+
         for i in range(len(decoder_layers) - 1):
             in_feat = decoder_layers[i]      # e.g., 256
             out_feat = decoder_layers[i+1]   # e.g., 128
 
             # Upsampling layer
-            self.ups.append(
-                nn.ConvTranspose2d(in_feat, out_feat, kernel_size=2, stride=2)
-            )
+            if upsampling_mode == "bilinear":
+                self.ups.append(
+                    nn.Sequential(
+                        nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+                        nn.Conv2d(in_feat, out_feat, kernel_size=3, padding=1) # Smooths the interpolation
+                    )
+                )
+            else:
+                self.ups.append(
+                    nn.ConvTranspose2d(in_feat, out_feat, kernel_size=2, stride=2)
+                )
+
             # Double convolution after concatenating skip connections
             self.ups.append(
                 DoubleConv(in_feat, out_feat, config, dilation=1)
