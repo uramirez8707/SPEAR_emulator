@@ -2,10 +2,13 @@
 #%%
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import tensorflow as tf
 from tensorflow.keras import Model
 import xarray as xr
@@ -14,157 +17,177 @@ import xarray as xr
 print("TensorFlow version:", tf.__version__)
 print("TensorFlow keras version:", tf.keras.__version__)
 
-data_dir = "/home/Mikyung.Lee/spear-emulator-data"
-t_ref = Path(data_dir)/"atmos.192101-201012.t_ref.nc"
+train = True
+load = True
+learning_rate = 1e-2
+epochs = 1000
+filters = 32
 
-#load and normalize
-with xr.open_dataset(t_ref, decode_timedelta=True) as ds:
-    t_ref = ds["t_ref"].values    
-    ntimes = t_ref.shape[0]
-
-# Split into train/val/test: 60% / 20% / 20%.
-train_end = int(0.6 * ntimes)
-val_end = int(0.8 * ntimes)
-
-t_ref_train = t_ref[:train_end]
-t_ref_val = t_ref[train_end:val_end]
-t_ref_test = t_ref[val_end:]
-
-splits = {
-    "train": t_ref_train,
-    "val": t_ref_val,
-    "test": t_ref_test,
-}
-
-normalizers, normalized_tref = {}, {}
-for split_name, split_values in splits.items():
-    normalizer = tf.keras.layers.Normalization(axis=-1)
-    normalizer.adapt(split_values)
-    normalizers[split_name] = normalizer
-    normalized_tref[split_name] = tf.expand_dims(normalizer(split_values), axis=-1)
-
+train_fraction = 0.6
+val_fraction = 0.2
 
 sequence_length = 3
 batch_size = 1
 
-train_ds = tf.keras.utils.timeseries_dataset_from_array(
-    data=normalized_tref["train"][:-1],
-    targets=normalized_tref["train"][sequence_length:],
-    sequence_length=sequence_length,
-    sequence_stride=1,
-    shuffle=False,
-    batch_size=batch_size,
-)
-
-val_ds = tf.keras.utils.timeseries_dataset_from_array(
-    data=normalized_tref["val"][:-1],
-    targets=normalized_tref["val"][sequence_length:],
-    sequence_length=sequence_length,
-    sequence_stride=1,
-    shuffle=False,
-    batch_size=batch_size,
-)
-
-input_shape = next(iter(train_ds))[0].shape[1:]
-
-train = True
-load = True
-learning_rate = 1e-3
+plot_train = False
+plot_val = True
+plot_test = True
+plot_rollout = True
 
 # Model and history artifacts.
 artifact_dir = Path(__file__).resolve().parent / "artifacts"
 artifact_dir.mkdir(parents=True, exist_ok=True)
-model_path = artifact_dir / "convlstm_tref.keras"
-history_path = artifact_dir / "convlstm_tref_history.json"
+model_path = artifact_dir / f"convlstm_tref_{filters}.keras"
+history_path = artifact_dir / f"convlstm_tref_{filters}_history.json"
 
-history_dict = {"loss": [], "mae": []}
-if history_path.exists():
-    loaded = json.loads(history_path.read_text())
-    if isinstance(loaded, dict):
-        history_dict.update({k: v if isinstance(v, list) else [v] for k, v in loaded.items()})
+# load data
+data_dir = "/home/Mikyung.Lee/spear-emulator-data"
+t_ref = Path(data_dir)/"atmos.192101-201012.t_ref.nc"
+with xr.open_dataset(t_ref, decode_timedelta=True) as ds:
+    t_ref = ds["t_ref"].values
+    lat = ds["lat"].values
+    lon = ds["lon"].values
+    ntimes = t_ref.shape[0]
 
-if load:
-    if not model_path.exists():
-        raise FileNotFoundError(f"Saved model not found: {model_path}")
-    model = tf.keras.models.load_model(model_path)
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-        loss="mse",
-        metrics=["mae"],
+# compute time
+train_start, train_end = 0, int(train_fraction * ntimes)
+val_start, val_end = train_end, int((train_fraction + val_fraction) * ntimes)
+test_start, test_end = val_end, ntimes
+
+# split data
+t_ref_dict = {
+    "train": t_ref[train_start:train_end],
+    "val": t_ref[val_start:val_end],
+    "test": t_ref[test_start:test_end],
+}
+
+# normalize data
+normalized_tref_dict = {}
+for datatype, data in t_ref_dict.items():
+    normalizer = tf.keras.layers.Normalization(axis=-1)
+    normalizer.adapt(data)
+    normalized_tref_dict[datatype] = tf.expand_dims(normalizer(data), axis=-1)
+
+# dataset
+share_kwargs = {"sequence_length": sequence_length, "sequence_stride": 1, "shuffle": False, "batch_size": batch_size}
+ds_dict = {
+    datatype: tf.keras.utils.timeseries_dataset_from_array(
+        data=data[:-1], targets=data[sequence_length:], **share_kwargs,
     )
-    print(f"Loaded model from: {model_path}")
-    print(f"Recompiled loaded model with learning rate: {learning_rate}")
-    if history_path.exists():
-        print(f"Loaded training history from: {history_path}")
+    for datatype, data in normalized_tref_dict.items()
+}
+
+history_dict = {}
+if history_path.exists():
+    history_dict = json.loads(history_path.read_text()) 
+
+# prepare model
+if load:
+    if not model_path.exists(): raise FileNotFoundError(f"Saved model not found: {model_path}")
+    model = tf.keras.models.load_model(model_path)
 else:
+    input_shape = next(iter(ds_dict["train"]))[0].shape[1:]
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=input_shape),
-        tf.keras.layers.ConvLSTM2D(filters=8, kernel_size=(3, 3), padding="same", activation="tanh"),
+        tf.keras.layers.ConvLSTM2D(filters=filters, kernel_size=(3, 3), padding="same", activation="tanh"),
         tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), padding="same"),
     ])
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate), loss="mse", metrics=["mae"])
-    print("Using a new model instance")
 
-if train:
-    model.summary()
+# compile model
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate), loss="mse", metrics=["mae"])
+model.summary()
+print(f"load model={load}, Learning rate: {learning_rate}")
+
+# train
+if train:    
     history = model.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=5000,
+        ds_dict["train"],
+        epochs=epochs,
         verbose=2,
+        validation_freq=100,
     )
+    model.save(model_path)
     for key, values in history.history.items():
         history_dict.setdefault(key, [])
-        history_dict[key].extend(float(v) for v in values)
-
-    model.save(model_path)
+        history_dict[key].extend(values)
     history_path.write_text(json.dumps(history_dict, indent=2))
     print(f"Saved trained model to: {model_path}")
     print(f"Saved training history to: {history_path}")
 
-train_loss, train_mae = model.evaluate(train_ds, verbose=0)
-train_pred = model.predict(train_ds)
-
-val_loss, val_mae = model.evaluate(val_ds, verbose=0)
-val_pred = model.predict(val_ds)
-
-print("train", train_loss, train_mae)
-print("val", val_loss, val_mae)
-
+# evaluate model fitting
+predicted = {}
+for label in ["train", "val", "test"]:
+    loss, mae = model.evaluate(ds_dict[label], verbose=0)
+    predicted[label] = model.predict(ds_dict[label])
+    print(f"{label} loss: {loss}, mae: {mae}")
 
 #test roll out
-forecast = normalized_tref["test"][:sequence_length]
-for itime in range(val_end+sequence_length, ntimes):
-    predicted = model(tf.expand_dims(forecast[-sequence_length:, :, :, :], axis=0))
-    forecast = tf.concat([forecast, predicted], axis=0)
+forecast_tf = normalized_tref_dict["test"][:sequence_length]
+for itime in range(test_start+sequence_length, test_end):
+    next_pred = model(tf.expand_dims(forecast_tf[-sequence_length:, :, :, :], axis=0))
+    forecast_tf = tf.concat([forecast_tf, next_pred], axis=0)
+predicted["forecast"] = forecast_tf.numpy()[sequence_length:]
 
-test_time_index = np.arange(val_end, ntimes)
-test_answer_mean = np.mean(normalized_tref["test"].numpy(), axis=(1, 2, 3))
-forecast_mean = np.mean(forecast.numpy(), axis=(1, 2, 3))
+#hack for plotting
+normalized_tref_dict["forecast"] = normalized_tref_dict["test"]   
 
-# Plot train answers against train predictions on the global timeline.
-train_answer_mean = np.mean(normalized_tref["train"].numpy(), axis=(1, 2, 3))
-train_time_index = np.arange(0, train_end)
-train_pred_mean = np.mean(train_pred, axis=(1, 2, 3))
+# Plot training loss from the saved history artifact.
+if history_path.exists():
+    loss = history_from_file = json.loads(history_path.read_text()).get("loss")
+    fig, ax = plt.subplots(figsize=(10, 4))    
+    ax.plot(loss, label="loss", color="tab:blue")
+    ax.set_title("Training Loss")
+    ax.legend()
 
-# Plot validation answers against validation predictions on the global timeline.
-val_answer_mean = np.mean(normalized_tref["val"].numpy(), axis=(1, 2, 3))
-val_time_index = np.arange(train_end, val_end)
-val_pred_mean = np.mean(val_pred, axis=(1, 2, 3))
+# plotting means
+time = np.arange(ntimes)
+plot_config = {
+    "train": SimpleNamespace(plot=plot_train, time=time[train_start:train_end]),
+    "val": SimpleNamespace(plot=plot_val, time=time[val_start:val_end]),
+    "test": SimpleNamespace(plot=plot_test, time=time[test_start:test_end]),
+    "forecast": SimpleNamespace(plot=plot_rollout, time=time[test_start:test_end]),
+}
+fig, ax = plt.subplots(figsize=(14, 10))
+for label, config in plot_config.items():
+    if config.plot:
+        answer_mean = np.mean(normalized_tref_dict[label].numpy(), axis=(1, 2, 3))
+        pred_mean = np.mean(predicted[label], axis=(1, 2, 3))
+        ax.plot(config.time, answer_mean, label=f"{label} answers", color="black")
+        ax.plot(config.time[sequence_length:], pred_mean, label=f"{label} mean", alpha=0.5)
+ax.legend()
+
+# contour map for the last timestep of t_ref.
+timestep = -1
+map_stride = 2
+
+fig, axes = plt.subplots(1, 2, subplot_kw={'projection': ccrs.PlateCarree()})
+
+lon2d, lat2d = np.meshgrid(lon, lat)
+lon2d_map = lon2d[::map_stride, ::map_stride]
+lat2d_map = lat2d[::map_stride, ::map_stride]
+forecast_map = predicted["forecast"][timestep, ::map_stride, ::map_stride, 0]
+t_ref_map = predicted["test"][timestep+sequence_length, ::map_stride, ::map_stride, 0]
+
+plot_kwargs = {
+    "levels": 10, 
+    "cmap": "coolwarm", 
+    "vmin": min(np.min(t_ref_map), np.min(forecast_map)),
+    "vmax": max(np.max(t_ref_map), np.max(forecast_map)), 
+    "transform": ccrs.PlateCarree()
+}
+
+contour_ref = axes[0].contourf(lon2d_map, lat2d_map, t_ref_map, **plot_kwargs)
+contour_fcst = axes[1].contourf(lon2d_map, lat2d_map, forecast_map, **plot_kwargs)
+
+for label, ax in zip(["t_ref", "forecast"], axes):
+    ax.coastlines()
+    ax.set_title(f"{label} at timestep {timestep}")
+    
+plt.colorbar(contour_ref, ax=axes[0], shrink=0.8, pad=0.05, label="t_ref")
+plt.colorbar(contour_fcst, ax=axes[1], shrink=0.8, pad=0.05, label="forecast")
 
 
-plt.figure(figsize=(10, 4))
-#train
-plt.plot(train_time_index, train_answer_mean, label="train answers", color="black")
-plt.plot(train_time_index[sequence_length:], train_pred_mean, label="train_pred mean", alpha=0.3)
-#val
-plt.plot(val_time_index, val_answer_mean, label="val answers", color="black")
-plt.plot(val_time_index[sequence_length:], val_pred_mean, label="val_pred mean", alpha=0.3)
-#predict
-plt.plot(test_time_index, test_answer_mean, label="test answers", color="black")
-plt.plot(test_time_index, forecast_mean, label="forecast mean", alpha=0.3)
-plt.legend()
-plt.tight_layout()
+
 plt.show()
 
 #https://www.tensorflow.org/tutorials/structured_data/time_series
