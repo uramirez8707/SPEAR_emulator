@@ -1,4 +1,4 @@
-
+  
 #%%
 from pathlib import Path
 import json
@@ -19,14 +19,14 @@ print("TensorFlow keras version:", tf.keras.__version__)
 
 train = True
 load = True
-learning_rate = 1e-2
+learning_rate = 1e-3
 epochs = 1000
 filters = 32
 
 train_fraction = 0.6
 val_fraction = 0.2
 
-sequence_length = 3
+sequence_length = 5
 batch_size = 1
 
 plot_train = False
@@ -37,8 +37,8 @@ plot_rollout = True
 # Model and history artifacts.
 artifact_dir = Path(__file__).resolve().parent / "artifacts"
 artifact_dir.mkdir(parents=True, exist_ok=True)
-model_path = artifact_dir / f"convlstm_tref_{filters}.keras"
-history_path = artifact_dir / f"convlstm_tref_{filters}_history.json"
+model_path = artifact_dir / f"convlstm_tref_{filters}_seqlength_{sequence_length}.keras"
+history_path = artifact_dir / f"convlstm_tref_{filters}_seqlength_{sequence_length}_history.json"
 
 # load data
 data_dir = "/home/Mikyung.Lee/spear-emulator-data"
@@ -104,7 +104,6 @@ if train:
         ds_dict["train"],
         epochs=epochs,
         verbose=2,
-        validation_freq=100,
     )
     model.save(model_path)
     for key, values in history.history.items():
@@ -185,8 +184,6 @@ for label, ax in zip(["t_ref", "forecast"], axes):
     
 plt.colorbar(contour_ref, ax=axes[0], shrink=0.8, pad=0.05, label="t_ref")
 plt.colorbar(contour_fcst, ax=axes[1], shrink=0.8, pad=0.05, label="forecast")
-
-
 
 plt.show()
 
