@@ -35,6 +35,7 @@ plot_test = True
 plot_rollout = True
 
 # Model and history artifacts.
+# restart files in /home/Mikyung.Lee/SPEAR_emulator/convlstm-keras/artifacts
 artifact_dir = Path(__file__).resolve().parent / "artifacts"
 artifact_dir.mkdir(parents=True, exist_ok=True)
 model_path = artifact_dir / f"convlstm_tref_{filters}_seqlength_{sequence_length}.keras"
